@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment files
+.env
+.env.local
+.env.*
+!.env.example
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+
+# Database
+*.db
+*.sqlite3
+
+# Docker volumes
+docker_pgdata/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Linters / cache
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# Logs
+*.log
+
+# Misc
+*.bak
+*.tmp
+.claude/
