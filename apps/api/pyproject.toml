@@ -1,20 +1,64 @@
 [project]
-name = "minutare-med"
-version = "0.1.0"
-description = "Plataforma operacional para clínica médica com IA nativa"
+name = "inteliclinic"
+version = "0.2.0"
+description = "Plataforma de IA para clínicas médicas — deploy dedicado por clínica"
 requires-python = ">=3.11"
+
 dependencies = [
+    # --- Web framework ---
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
+
+    # --- Database ---
     "sqlmodel>=0.0.22",
     "sqlalchemy[asyncio]>=2.0.35",
     "asyncpg>=0.30.0",
     "alembic>=1.14.0",
-    "pydantic-settings>=2.6.0",
-    "httpx>=0.27.0",
     "pgvector>=0.3.6",
+
+    # --- Config ---
+    "pydantic-settings>=2.6.0",
+    "pyyaml>=6.0",
+
+    # --- HTTP ---
+    "httpx>=0.27.0",
     "python-multipart>=0.0.12",
     "python-dateutil>=2.9.0",
+
+    # --- AI Engine — LangGraph ---
+    # Graph orchestration: https://github.com/langchain-ai/langgraph
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+
+    # --- NLU — Instructor ---
+    # Structured LLM output: https://github.com/567-labs/instructor
+    "instructor>=1.4.0",
+    "openai>=1.40.0",
+    "anthropic>=0.34.0",
+
+    # --- RAG — LlamaIndex ---
+    # RAG framework: https://github.com/run-llama/llama_index
+    "llama-index-core>=0.11.0",
+    "llama-index-vector-stores-qdrant>=0.3.0",
+    "llama-index-embeddings-openai>=0.2.0",
+
+    # --- RAG — Qdrant vector store ---
+    # https://github.com/qdrant/qdrant
+    "qdrant-client>=1.11.0",
+
+    # --- Document parsing — Docling ---
+    # PDF/DOCX parsing: https://github.com/docling-project/docling
+    "docling>=2.0.0",
+
+    # --- Safety — Guardrails AI ---
+    # Output validation: https://github.com/guardrails-ai/guardrails
+    "guardrails-ai>=0.5.0",
+
+    # --- Analytics — PyOD ---
+    # Anomaly detection: https://github.com/yzhao062/pyod
+    "pyod>=2.0.0",
+    "numpy>=1.26.0",
+    "scikit-learn>=1.5.0",
 ]
 
 [project.optional-dependencies]
@@ -22,8 +66,46 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.8.0",
+    "httpx>=0.27.0",
 ]
+
+evaluation = [
+    # RAG quality evaluation: https://github.com/explodinggradients/ragas
+    "ragas>=0.1.0",
+    "datasets>=2.20.0",
+]
+
+voice = [
+    # Voice/phone channel (Phase 2): https://github.com/livekit/agents
+    # "livekit-agents>=0.8.0",
+]
+
+nlp = [
+    # Clinical NLP (Phase 2): https://github.com/medspacy/medspacy
+    # "medspacy>=1.0.0",
+]
+
+all = [
+    "inteliclinic[evaluation,voice,nlp]",
+]
+
+[project.scripts]
+inteliclinic-ingest = "scripts.ingest_docs:main"
+inteliclinic-evaluate = "scripts.evaluate_rag:main"
+inteliclinic-seed = "scripts.seed_data:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "apps/api/tests"]
+asyncio_mode = "auto"
