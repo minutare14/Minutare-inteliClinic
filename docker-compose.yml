@@ -1,0 +1,136 @@
+# docker-compose.yml — Produção / Dokploy
+# =========================================
+# Build context: raiz do repositório (.)
+# Configuração por: .env (copiar de .env.example)
+#
+# Serviços:
+#   db        — PostgreSQL 16 + pgvector
+#   qdrant    — Banco vetorial (RAG)
+#   api       — FastAPI (migrations + seed + API)
+#   frontend  — Next.js 16 (standalone build)
+#
+# Redes:
+#   internal      — comunicação privada entre containers
+#   dokploy-network — rede externa do Traefik/Dokploy (expose via proxy)
+
+services:
+
+  # ── PostgreSQL 16 + pgvector ───────────────────────────────────
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: ${COMPOSE_PROJECT_NAME:-minutare}-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── Qdrant (vector store para RAG) ────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.9.2
+    container_name: ${COMPOSE_PROJECT_NAME:-minutare}-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz | grep -q 'ok' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── API FastAPI ────────────────────────────────────────────────
+  # Build context = raiz do projeto (para incluir scripts/)
+  # Entrypoint: migrations → seed → uvicorn
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: ${COMPOSE_PROJECT_NAME:-minutare}-api:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-minutare}-api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      QDRANT_URL: http://qdrant:6333
+    networks:
+      - internal
+      - dokploy-network
+    depends_on:
+      db:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-api.rule=Host(`${API_DOMAIN}`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-api.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${COMPOSE_PROJECT_NAME:-minutare}-api.loadbalancer.server.port=8000"
+      - "traefik.docker.network=dokploy-network"
+    restart: unless-stopped
+
+  # ── Frontend Next.js ───────────────────────────────────────────
+  # NEXT_PUBLIC_API_URL é variável de BUILD — precisa estar no .env
+  # antes de rodar `docker compose build`
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+    image: ${COMPOSE_PROJECT_NAME:-minutare}-frontend:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-minutare}-frontend
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    networks:
+      - internal
+      - dokploy-network
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q 'ok' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-frontend.rule=Host(`${FRONTEND_DOMAIN}`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-frontend.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${COMPOSE_PROJECT_NAME:-minutare}-frontend.loadbalancer.server.port=3000"
+      - "traefik.docker.network=dokploy-network"
+    restart: unless-stopped
+
+# ── Redes ──────────────────────────────────────────────────────
+networks:
+  internal:
+    driver: bridge
+  dokploy-network:
+    external: true   # Rede gerenciada pelo Dokploy/Traefik — NÃO criar aqui
+
+# ── Volumes ────────────────────────────────────────────────────
+volumes:
+  pgdata:       # Dados do PostgreSQL — CRÍTICO, não deletar
+  qdrant_data:  # Índices vetoriais do Qdrant (RAG)

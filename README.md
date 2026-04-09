@@ -582,6 +582,230 @@ python scripts/evaluate_rag.py \
 
 ---
 
+## Arquitetura de Deploy
+
+```
+Internet
+    │
+    ▼
+┌─────────────────────────────────────────────────────┐
+│  Traefik (gerenciado pelo Dokploy)                  │
+│  SSL automático via Let's Encrypt                   │
+│  painel.suaclinica.com.br → frontend:3000           │
+│  api.suaclinica.com.br    → api:8000                │
+└─────────────────────────────────────────────────────┘
+    │                           │
+    ▼                           ▼
+┌──────────────┐        ┌──────────────────┐
+│  frontend    │        │  api (FastAPI)   │
+│  Next.js 16  │──────▶│  /api/v1/*       │
+│  porta 3000  │        │  /health         │
+│  (interno)   │        │  porta 8000      │
+└──────────────┘        │  (interno)       │
+                        └────────┬─────────┘
+                                 │
+               ┌─────────────────┴──────────────────┐
+               ▼                                     ▼
+    ┌──────────────────┐                 ┌──────────────────┐
+    │  db              │                 │  qdrant          │
+    │  PostgreSQL 16   │                 │  Vector DB       │
+    │  + pgvector      │                 │  porta 6333      │
+    │  porta 5432      │                 │  (interno)       │
+    │  (interno)       │                 └──────────────────┘
+    └──────────────────┘
+
+Volumes persistentes:
+  pgdata      → dados do PostgreSQL (CRÍTICO)
+  qdrant_data → índices vetoriais do RAG
+
+Redes:
+  internal        → comunicação privada entre containers
+  dokploy-network → rede do Traefik (somente api e frontend)
+
+Público:  frontend, api
+Interno:  db, qdrant
+```
+
+---
+
+## Deploy com Docker Compose no Dokploy
+
+### Pré-requisitos
+
+- VPS com Docker instalado
+- [Dokploy](https://dokploy.com) instalado e rodando
+- Domínios apontados para o IP da VPS (A record no DNS)
+- Git com o repositório acessível pelo Dokploy
+
+### Arquivos usados
+
+| Arquivo | Função |
+|---------|--------|
+| `docker-compose.yml` (raiz) | Compose de produção para Dokploy |
+| `.env.example` (raiz) | Template de variáveis — copiar para `.env` |
+| `apps/api/Dockerfile` | Imagem da API (contexto: raiz do projeto) |
+| `frontend/Dockerfile` | Imagem do frontend (multi-stage, standalone) |
+| `apps/api/entrypoint.sh` | Migrations → seed → uvicorn |
+
+### Passo a passo no Dokploy
+
+#### 1. Criar a aplicação no Dokploy
+
+1. Acesse o painel do Dokploy
+2. Clique em **New Project** → **Docker Compose**
+3. Configure o repositório Git (URL + branch `main`)
+4. Em **Compose File Path**, informe: `docker-compose.yml`
+5. Salve
+
+#### 2. Configurar variáveis de ambiente
+
+No Dokploy, acesse **Environment** da aplicação e preencha com base no `.env.example` da raiz.
+
+Variáveis obrigatórias:
+
+```env
+COMPOSE_PROJECT_NAME=nome-da-clinica     # identificador único
+FRONTEND_DOMAIN=painel.suaclinica.com.br
+API_DOMAIN=api.suaclinica.com.br
+NEXT_PUBLIC_API_URL=https://api.suaclinica.com.br
+
+POSTGRES_USER=minutare
+POSTGRES_PASSWORD=SenhaFortaAqui123!
+POSTGRES_DB=minutare_prod
+
+APP_ENV=production
+APP_SECRET_KEY=<openssl rand -hex 32>
+CORS_ORIGINS=["https://painel.suaclinica.com.br"]
+
+OPENAI_API_KEY=sk-...
+EMBEDDING_PROVIDER=openai
+
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_WEBHOOK_URL=https://api.suaclinica.com.br/api/v1/telegram/webhook
+TELEGRAM_WEBHOOK_SECRET=<openssl rand -hex 32>
+```
+
+> **ATENÇÃO:** `NEXT_PUBLIC_API_URL` é baked no build do Next.js.
+> Ela deve estar definida **antes** do primeiro `docker compose build`.
+> Se mudar o domínio da API, rebuild o container do frontend.
+
+#### 3. Configurar domínios
+
+No Dokploy, após o primeiro deploy:
+
+1. Acesse **Domains** de cada serviço
+2. Para `frontend`: adicione `painel.suaclinica.com.br` → porta `3000`
+3. Para `api`: adicione `api.suaclinica.com.br` → porta `8000`
+4. Ative **HTTPS** (Let's Encrypt automático)
+
+Alternativamente, os labels Traefik no `docker-compose.yml` já configuram isso automaticamente se o DNS estiver apontado.
+
+#### 4. Fazer o deploy
+
+No Dokploy, clique em **Deploy**. O processo:
+
+1. Clona o repositório
+2. Lê o `.env` configurado
+3. Faz o build de `api` e `frontend`
+4. Sobe os containers em ordem (`db` → `qdrant` → `api` → `frontend`)
+5. Executa migrations e seed automaticamente (via `entrypoint.sh`)
+
+### Serviços saudáveis esperados
+
+Após deploy bem-sucedido, todos devem aparecer como **healthy**:
+
+| Serviço | Healthcheck | Esperado |
+|---------|-------------|---------|
+| `db` | `pg_isready` | `healthy` |
+| `qdrant` | `GET /healthz` | `healthy` |
+| `api` | `GET /health` | `healthy` |
+| `frontend` | `GET /api/health` | `healthy` |
+
+### Verificar logs
+
+```bash
+# No servidor via SSH:
+docker compose logs api --tail=50 -f
+docker compose logs frontend --tail=50 -f
+docker compose logs db --tail=20
+```
+
+### Testar após deploy
+
+```bash
+# Health da API
+curl https://api.suaclinica.com.br/health
+# Esperado: {"status":"ok","service":"minutare-med"}
+
+# Health do banco (via API)
+curl https://api.suaclinica.com.br/health/db
+# Esperado: {"status":"ok","database":"connected"}
+
+# Health do frontend
+curl https://painel.suaclinica.com.br/api/health
+# Esperado: {"status":"ok","service":"minutare-frontend"}
+
+# Painel acessível no browser
+# https://painel.suaclinica.com.br
+```
+
+### Erros comuns e diagnóstico
+
+| Erro | Causa provável | Solução |
+|------|---------------|---------|
+| `bad gateway` no Traefik | Container não subiu / healthcheck falhando | `docker compose logs api` |
+| Frontend com `bad gateway` | API não healthy quando frontend subiu | Aguardar ou reiniciar frontend |
+| `default cert` no Traefik | DNS não aponta para a VPS ainda | Verificar A record no DNS |
+| `NEXT_PUBLIC_API_URL` errada | Var não definida antes do build | Redefinir e rebuildar frontend |
+| Migrations falhando | Banco não acessível | Verificar `POSTGRES_*` vars |
+| `connection refused` na API | Seed tentando conectar antes do DB | O entrypoint já aguarda — checar logs |
+| Qdrant `unhealthy` | Imagem ainda iniciando | Aguardar `start_period: 30s` |
+
+### Atualizar o deploy (nova versão)
+
+```bash
+# No Dokploy: clique em "Redeploy"
+# Ou via SSH:
+git pull origin main
+docker compose build --no-cache
+docker compose up -d
+```
+
+---
+
+## Desenvolvimento Local
+
+### Pré-requisitos
+
+- Docker Desktop instalado e rodando
+- Node.js 18+
+- Python 3.11+ (opcional, para desenvolvimento da API sem Docker)
+
+### Subir com Docker (recomendado)
+
+```bash
+cd infra/docker
+cp .env.example .env
+# Edite .env com sua OPENAI_API_KEY
+docker compose up --build
+```
+
+- API: http://localhost:8000
+- Docs (Swagger): http://localhost:8000/docs
+- Qdrant dashboard: http://localhost:6333/dashboard
+
+### Subir o frontend separadamente
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Painel: http://localhost:3000
+
+---
+
 ## Documentação
 
 | Documento | Descrição |

@@ -1,14 +1,19 @@
+# Build context: project root (/)
+# docker-compose build context must be set to the repository root
+# so that scripts/ directory is accessible during build.
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps
+# System deps: build tools, libpq (asyncpg), curl (healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev && \
-    rm -rf /var/lib/apt/lists/*
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps first (cache layer)
-COPY pyproject.toml .
+# Install Python deps — cached layer, only rebuilds when pyproject.toml changes
+COPY apps/api/pyproject.toml ./pyproject.toml
 RUN pip install --no-cache-dir \
     "fastapi>=0.115.0" \
     "uvicorn[standard]>=0.30.0" \
@@ -23,10 +28,20 @@ RUN pip install --no-cache-dir \
     "python-dateutil>=2.9.0"
 
 # Copy application code
-COPY app/ app/
-COPY alembic/ alembic/
-COPY alembic.ini .
+COPY apps/api/app/ ./app/
+COPY apps/api/alembic/ ./alembic/
+COPY apps/api/alembic.ini ./alembic.ini
+
+# Copy seed and utility scripts (from project root /scripts)
+COPY scripts/ ./scripts/
+
+# Copy and prepare startup entrypoint
+COPY apps/api/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
+    CMD curl -sf http://localhost:8000/health || exit 1
+
+ENTRYPOINT ["./entrypoint.sh"]

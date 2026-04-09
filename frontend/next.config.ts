@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Produces a minimal standalone build — required for Docker production image.
+  // Output: .next/standalone/ + .next/static/
+  output: "standalone",
 };
 
 export default nextConfig;

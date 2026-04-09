@@ -1,0 +1,26 @@
+# Root .dockerignore — used when build context is the project root
+.git
+.gitignore
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+frontend/.next
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.venv
+**/venv/
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/dist
+**/build
+**/*.egg-info
+**/htmlcov
+**/.coverage
+**/*.log
+docs/
+GUIAS-DEV/
+tests/
+README.md

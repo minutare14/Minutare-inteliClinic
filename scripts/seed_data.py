@@ -19,8 +19,17 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Add project to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "apps" / "api"))
+# Support both local dev and Docker container contexts.
+# Local:  script at <root>/scripts/ → API at <root>/apps/api/
+# Docker: script at /app/scripts/   → API at /app/  (app/ is directly under WORKDIR)
+_script_dir = Path(__file__).resolve().parent
+_project_root = _script_dir.parent
+if (_project_root / "app").is_dir():
+    # Docker context: /app/app/main.py exists
+    sys.path.insert(0, str(_project_root))
+else:
+    # Local dev context: <root>/apps/api/app/main.py
+    sys.path.insert(0, str(_project_root / "apps" / "api"))
 
 
 # ── Data definitions ──────────────────────────────────────────
@@ -249,16 +258,22 @@ async def seed_db(database_url: str) -> None:
             print(f"  + {p['full_name']} ({p['convenio_name']})")
         await session.commit()
 
-        # 3. Schedule slots
+        # 3. Schedule slots — only generate if none exist (idempotent)
         print("\n--- Schedule Slots ---")
-        slots = generate_slots(prof_ids)
-        count = 0
-        for s in slots:
-            slot = ScheduleSlot(**s)
-            session.add(slot)
-            count += 1
-        await session.commit()
-        print(f"  + {count} slots for {len(prof_ids)} professionals (14 days)")
+        from sqlalchemy import func
+        slot_count_result = await session.execute(select(func.count()).select_from(ScheduleSlot))
+        existing_slot_count = slot_count_result.scalar_one()
+        if existing_slot_count > 0:
+            print(f"  = Slots already exist ({existing_slot_count} total), skipping generation")
+        else:
+            slots = generate_slots(prof_ids)
+            count = 0
+            for s in slots:
+                slot = ScheduleSlot(**s)
+                session.add(slot)
+                count += 1
+            await session.commit()
+            print(f"  + {count} slots for {len(prof_ids)} professionals (14 days)")
 
         # 4. RAG documents
         print("\n--- RAG Documents ---")

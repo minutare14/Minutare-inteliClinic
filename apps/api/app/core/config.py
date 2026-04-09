@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     llm_model: str = ""  # override model name (empty = provider default)
 
+    # --- Qdrant ---
+    qdrant_url: str = "http://localhost:6333"
+
     # --- RAG ---
     rag_confidence_threshold: float = 0.75
     rag_top_k: int = 5
