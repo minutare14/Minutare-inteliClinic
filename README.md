@@ -415,6 +415,104 @@ Estas ações violam a arquitetura do produto e comprometem a operação de toda
 
 ---
 
+## Painel como Interface Operacional Principal
+
+O frontend não é um painel de leitura. É o **console operacional do sistema**.
+
+A API é a camada de execução. O terminal e os scripts são auxiliares para automação e setup. O painel é o caminho principal de uso da clínica no dia a dia.
+
+```
+Fluxo correto:
+  Operador → Painel → API → Banco / IA / Integrações
+
+Scripts / curl → apenas para automação, deploy e setup inicial
+```
+
+### Por que isso importa
+
+Quando operações importantes dependem do terminal, o sistema cria uma barreira técnica que impede a equipe clínica de operar com autonomia. Receptivistas, gestores e administradores precisam conseguir fazer seu trabalho pelo painel — sem depender de um desenvolvedor para cada ação.
+
+### Arquitetura de responsabilidades
+
+| Camada | Responsabilidade |
+|--------|-----------------|
+| **Painel (frontend)** | Interface principal para toda operação diária — recepção, agenda, handoff, conhecimento, governança |
+| **API (backend)** | Execução das regras de negócio, validações, persistência, IA |
+| **Scripts** | Setup inicial (seed, ingestão de docs), automações em batch, CI/CD |
+| **Terminal/curl** | Debug técnico, onboarding de deploy, operações de infraestrutura |
+
+A lógica de negócio **nunca** fica no frontend. O painel chama a API; a API executa as regras.
+
+---
+
+### Operações disponíveis no painel
+
+#### Operação diária (Recepção)
+
+| Operação | Página | Status |
+|----------|--------|--------|
+| Visualizar lista de pacientes | `/patients` | Disponível |
+| Criar novo paciente | `/patients` | Disponível |
+| Editar dados do paciente | `/patients/[id]` | Disponível |
+| Ver histórico de conversas | `/conversations` | Disponível |
+| Ver mensagens de uma conversa | `/conversations/[id]` | Disponível |
+| Visualizar agenda (por profissional, data, status) | `/schedules` | Disponível |
+| Cancelar agendamento | `/schedules` | Disponível |
+| Assumir handoff (escalar para atendimento humano) | `/handoffs` | Disponível |
+| Marcar handoff como resolvido | `/handoffs` | Disponível |
+
+#### Administração da clínica (Gestão)
+
+| Operação | Página | Status |
+|----------|--------|--------|
+| Listar profissionais | `/professionals` | Disponível |
+| Cadastrar novo profissional | `/professionals` | Disponível |
+| Editar dados do profissional | `/professionals` | Disponível |
+| Desativar profissional | `/professionals` | Disponível |
+| Ver dashboard com KPIs | `/dashboard` | Disponível |
+| Ver eventos de auditoria | `/audit` | Disponível |
+
+#### Knowledge Base / RAG
+
+| Operação | Página | Status |
+|----------|--------|--------|
+| Listar documentos da base | `/rag` | Disponível |
+| Adicionar documento à base (via texto) | `/rag` | Disponível |
+| Testar query RAG no painel | `/rag` | Disponível |
+| Upload de PDFs (via ingestão automática) | Scripts + `/rag` | Script + visualização |
+
+#### Integrações
+
+| Operação | Página | Status |
+|----------|--------|--------|
+| Ver status do webhook Telegram | `/integrations` | Disponível |
+| Configurar URL do webhook | `/integrations` | Disponível |
+| Verificar erros de integração | `/integrations` | Disponível |
+| WhatsApp / LiveKit | — | Fase 2 |
+
+#### Governança / Auditoria
+
+| Operação | Página | Status |
+|----------|--------|--------|
+| Visualizar trilha de auditoria | `/audit` | Disponível |
+| Filtrar por ator, ação, recurso | `/audit` | Disponível |
+| Status do sistema (API, DB) | `/settings` | Disponível |
+
+---
+
+### Perfis de acesso (RBAC — preparado para fase 2)
+
+O painel está estruturado para suportar controle de acesso por perfil. A implementação de autenticação JWT + RBAC completa está na fase 2, mas as rotas e menus já consideram a separação:
+
+| Perfil | Acesso |
+|--------|--------|
+| **Recepcionista** | Pacientes, Agenda, Conversas, Handoffs |
+| **Gestor** | Tudo da recepção + Profissionais, Dashboard, RAG (leitura) |
+| **Administrador** | Tudo + RAG (escrita), Integrações, Auditoria, Configurações |
+| **Suporte técnico** | Configurações, Integrações, Auditoria, sem dados clínicos |
+
+---
+
 ## Tecnologias e fases
 
 | Tecnologia | Fase | Status |

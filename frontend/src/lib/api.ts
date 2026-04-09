@@ -10,6 +10,11 @@ import type {
   RagDocument,
   DashboardSummary,
   HealthStatus,
+  ProfessionalCreate,
+  ProfessionalUpdate,
+  RagIngestRequest,
+  RagQueryResult,
+  TelegramWebhookInfo,
 } from "./types";
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -105,3 +110,42 @@ export const getRagDocuments = (category?: string) => {
 // Audit
 export const getAuditEvents = (limit = 100, offset = 0) =>
   fetchApi<AuditEvent[]>(`${API_PREFIX}/audit?limit=${limit}&offset=${offset}`);
+
+// Patients — mutations
+export const createPatient = (data: Record<string, unknown>) =>
+  fetchApi<Patient>(`${API_PREFIX}/patients`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updatePatient = (id: string, data: Record<string, unknown>) =>
+  fetchApi<Patient>(`${API_PREFIX}/patients/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+
+// Professionals — mutations
+export const getAllProfessionals = () =>
+  fetchApi<Professional[]>(`${API_PREFIX}/professionals/all`);
+
+export const createProfessional = (data: ProfessionalCreate) =>
+  fetchApi<Professional>(`${API_PREFIX}/professionals`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateProfessional = (id: string, data: ProfessionalUpdate) =>
+  fetchApi<Professional>(`${API_PREFIX}/professionals/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+
+export const deactivateProfessional = (id: string) =>
+  fetchApi<Professional>(`${API_PREFIX}/professionals/${id}`, { method: 'DELETE' });
+
+// RAG — mutations
+export const ingestDocument = (data: RagIngestRequest) =>
+  fetchApi<RagDocument>(`${API_PREFIX}/rag/ingest`, { method: 'POST', body: JSON.stringify(data) });
+
+export const queryRag = (query: string, top_k = 5, category?: string) => {
+  const body: Record<string, unknown> = { query, top_k };
+  if (category) body.category = category;
+  return fetchApi<RagQueryResult[]>(`${API_PREFIX}/rag/query`, { method: 'POST', body: JSON.stringify(body) });
+};
+
+// Telegram
+export const getTelegramWebhookInfo = () =>
+  fetchApi<TelegramWebhookInfo>(`${API_PREFIX}/telegram/webhook-info`);
+
+export const setTelegramWebhook = (url: string) =>
+  fetchApi<{ ok: boolean; description?: string }>(`${API_PREFIX}/telegram/set-webhook`, {
+    method: 'POST', body: JSON.stringify({ url }),
+  });

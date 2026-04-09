@@ -33,3 +33,39 @@ class ProfessionalRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def create(self, full_name: str, specialty: str, crm: str) -> Professional:
+        prof = Professional(full_name=full_name, specialty=specialty, crm=crm)
+        self.session.add(prof)
+        await self.session.commit()
+        await self.session.refresh(prof)
+        return prof
+
+    async def update(self, professional_id: uuid.UUID, **kwargs) -> Professional | None:
+        prof = await self.get_by_id(professional_id)
+        if not prof:
+            return None
+        for key, value in kwargs.items():
+            if value is not None:
+                setattr(prof, key, value)
+        await self.session.commit()
+        await self.session.refresh(prof)
+        return prof
+
+    async def deactivate(self, professional_id: uuid.UUID) -> Professional | None:
+        prof = await self.get_by_id(professional_id)
+        if not prof:
+            return None
+        prof.active = False
+        await self.session.commit()
+        await self.session.refresh(prof)
+        return prof
+
+    async def list_all(self, specialty: str | None = None) -> list[Professional]:
+        """List all professionals including inactive (for admin view)."""
+        stmt = select(Professional)
+        if specialty:
+            stmt = stmt.where(Professional.specialty.ilike(f"%{specialty}%"))
+        stmt = stmt.order_by(Professional.full_name)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

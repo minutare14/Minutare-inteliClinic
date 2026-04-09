@@ -1,8 +1,9 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import { usePatient } from "@/hooks/use-patients";
 import { PatientDetailCard } from "@/components/patients/patient-detail-card";
+import { PatientFormModal } from "@/components/patients/patient-form-modal";
 import { SectionHeader } from "@/components/ui/section-header";
 import { LoadingState } from "@/components/ui/loading-state";
 import Link from "next/link";
@@ -13,7 +14,8 @@ export default function PatientDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { data: patient, loading } = usePatient(id);
+  const { data: patient, loading, refetch } = usePatient(id);
+  const [showEdit, setShowEdit] = useState(false);
 
   if (loading) return <LoadingState />;
   if (!patient) return <p className="text-red-500">Paciente nao encontrado</p>;
@@ -24,12 +26,20 @@ export default function PatientDetailPage({
         title={patient.full_name}
         description={`ID: ${id.slice(0, 8)}...`}
         action={
-          <Link
-            href="/patients"
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            Voltar
-          </Link>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowEdit(true)}
+              className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Editar
+            </button>
+            <Link
+              href="/patients"
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              Voltar
+            </Link>
+          </div>
         }
       />
       <PatientDetailCard patient={patient} />
@@ -48,6 +58,13 @@ export default function PatientDetailPage({
           Ver agendamentos
         </Link>
       </div>
+
+      <PatientFormModal
+        open={showEdit}
+        onClose={() => setShowEdit(false)}
+        onSuccess={() => refetch()}
+        patient={patient}
+      />
     </div>
   );
 }

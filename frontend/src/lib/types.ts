@@ -106,3 +106,41 @@ export interface HealthStatus {
   service?: string;
   database?: string;
 }
+
+export interface RagQueryResult {
+  chunk_id: string;
+  document_id: string;
+  title: string;
+  content: string;
+  score: number;
+  category: string;
+}
+
+export interface RagIngestRequest {
+  title: string;
+  content: string;
+  category: string;
+  source_path?: string;
+}
+
+export interface TelegramWebhookInfo {
+  url: string;
+  has_custom_certificate: boolean;
+  pending_update_count: number;
+  last_error_date?: number;
+  last_error_message?: string;
+}
+
+export interface ProfessionalCreate {
+  full_name: string;
+  specialty: string;
+  crm: string;
+}
+
+export interface ProfessionalUpdate {
+  full_name?: string;
+  specialty?: string;
+  active?: boolean;
+}
+
+export type UserRole = 'receptionist' | 'manager' | 'admin' | 'support';
