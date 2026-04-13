@@ -24,12 +24,15 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_webhook_url: str = ""
     telegram_webhook_secret: str = ""
+    telegram_auto_webhook: bool = False  # se True, registra webhook automaticamente no startup
 
     # --- AI / LLM ---
+    llm_provider: str = ""  # groq | openai | anthropic | gemini (empty = auto-detect from keys)
     embedding_provider: str = "openai"  # openai | anthropic | local
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
+    groq_api_key: str = ""
     llm_model: str = ""  # override model name (empty = provider default)
 
     # --- Qdrant ---

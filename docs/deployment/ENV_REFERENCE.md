@@ -65,11 +65,21 @@ Mapa completo de todas as variáveis de ambiente do projeto.
 
 | Variável | Obrig. | Exemplo | Onde é usada | Impacto |
 |---|---|---|---|---|
-| `OPENAI_API_KEY` | VPS (se usar OpenAI) | `sk-...` | `config.py`, `llm_client.py`, `response_builder.py` | Sem chave, o sistema cai para templates de resposta hardcoded. |
-| `ANTHROPIC_API_KEY` | OPCIONAL | `sk-ant-...` | `config.py`, `llm_client.py` | Alternativa ao OpenAI. |
-| `GEMINI_API_KEY` | OPCIONAL | `AIzaSy...` | `config.py`, `llm_client.py` | Alternativa ao OpenAI. |
-| `EMBEDDING_PROVIDER` | OPCIONAL | `openai` | `config.py` | Provider para geração de embeddings. Valores: `openai`, `anthropic`, `local`. |
-| `LLM_MODEL` | OPCIONAL | _(vazio)_ | `config.py`, `llm_client.py` | Override do modelo. Vazio usa o default do provider. |
+| `LLM_PROVIDER` | OPCIONAL | `groq` | `config.py`, `llm_client.py` | Provider explícito: `groq`, `openai`, `anthropic`, `gemini`. Vazio = auto-detect pela primeira chave disponível (Groq → OpenAI → Anthropic → Gemini). |
+| `GROQ_API_KEY` | VPS (se usar Groq) | `gsk_...` | `config.py`, `llm_client.py` | Chave da Groq Cloud. Obter em https://console.groq.com/keys. |
+| `OPENAI_API_KEY` | VPS (se usar OpenAI) | `sk-...` | `config.py`, `llm_client.py`, `rag_service.py` | Chave OpenAI. Também usada para embeddings se `EMBEDDING_PROVIDER=openai`. |
+| `ANTHROPIC_API_KEY` | OPCIONAL | `sk-ant-...` | `config.py`, `llm_client.py` | Alternativa ao Groq/OpenAI. |
+| `GEMINI_API_KEY` | OPCIONAL | `AIzaSy...` | `config.py`, `llm_client.py` | Alternativa. Também suporta embeddings (`text-embedding-004`). |
+| `EMBEDDING_PROVIDER` | OPCIONAL | `openai` | `config.py`, `rag_service.py` | Provider para geração de embeddings RAG. Valores: `openai`, `gemini`, `local`. Se ausente, RAG usa busca textual (sem vetores). |
+| `LLM_MODEL` | OPCIONAL | `llama-3.3-70b-versatile` | `config.py`, `llm_client.py` | Override do modelo. Vazio = default do provider (Groq: `llama-3.3-70b-versatile`). |
+
+**Defaults por provider:**
+| Provider | Modelo default |
+|---|---|
+| Groq | `llama-3.3-70b-versatile` |
+| OpenAI | `gpt-4o-mini` |
+| Anthropic | `claude-sonnet-4-20250514` |
+| Gemini | `gemini-2.5-flash` |
 
 > Sem nenhuma API key, o orquestrador funciona em modo template (respostas fixas). O Telegram recebe resposta mas sem IA generativa.
 
@@ -80,10 +90,19 @@ Mapa completo de todas as variáveis de ambiente do projeto.
 | Variável | Obrig. | Exemplo | Onde é usada | Impacto |
 |---|---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | VPS | `123456:ABC-...` | `config.py`, `telegram/client.py` | Token do BotFather. Sem ele, nenhuma mensagem é enviada/recebida. |
-| `TELEGRAM_WEBHOOK_URL` | VPS | `https://api.suaclinica.com.br/api/v1/telegram/webhook` | `config.py`, rota de set-webhook | URL pública que o Telegram chama. Deve ser HTTPS e acessível. |
+| `TELEGRAM_WEBHOOK_URL` | VPS | `https://api.inteliclinic.minutarecore.space/api/v1/telegram/webhook` | `config.py`, `register_telegram_webhook.py` | URL pública que o Telegram chama. Deve ser HTTPS e acessível. |
 | `TELEGRAM_WEBHOOK_SECRET` | VPS | (32 chars hex) | `config.py`, `webhook_handler.py` | Valida que a requisição veio do Telegram. Gerar com `openssl rand -hex 32`. |
+| `TELEGRAM_AUTO_WEBHOOK` | OPCIONAL | `true` | `entrypoint.sh`, `register_telegram_webhook.py` | Se `true`, o webhook é registrado automaticamente no startup (idempotente). |
 
-> O webhook não é registrado automaticamente no start. Deve ser configurado via `POST /api/v1/telegram/set-webhook` após o deploy.
+**Registro automático do webhook (`TELEGRAM_AUTO_WEBHOOK=true`):**
+
+O `entrypoint.sh` chama `scripts/register_telegram_webhook.py` em cada startup da API:
+1. Consulta `getWebhookInfo` no Telegram para ver a URL atual.
+2. Se a URL atual já corresponde à `TELEGRAM_WEBHOOK_URL` configurada → nenhuma ação.
+3. Se diferente ou ausente → chama `setWebhook` com a nova URL e o secret.
+4. Falha não interrompe o startup (exit code não-zero apenas loga aviso).
+
+> Com `TELEGRAM_AUTO_WEBHOOK=true`, após o primeiro deploy na VPS o webhook fica configurado automaticamente — sem chamada manual.
 
 ---
 
@@ -180,10 +199,11 @@ APP_ENV=production
 APP_SECRET_KEY
 CORS_ORIGINS
 NEXT_PUBLIC_API_URL  ← precisa estar definida ANTES do build
-OPENAI_API_KEY (ou outro LLM)
+LLM_PROVIDER=groq + GROQ_API_KEY (ou outro provider + chave correspondente)
 TELEGRAM_BOT_TOKEN
 TELEGRAM_WEBHOOK_URL
 TELEGRAM_WEBHOOK_SECRET
+TELEGRAM_AUTO_WEBHOOK=true  ← recomendado para registro automático
 CLINIC_ID
 CLINIC_NAME
 ```
@@ -200,8 +220,8 @@ CLINIC_NAME
 
 ### Variáveis que afetam integrações externas
 
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`
-- `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_AUTO_WEBHOOK`
+- `LLM_PROVIDER` + `GROQ_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY`
 
 ### Variáveis injetadas automaticamente pelo docker-compose (não definir manualmente)
 

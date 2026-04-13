@@ -1,4 +1,8 @@
-# VPS Deploy Checklist — Minutare InteliClinic (Dokploy)
+# VPS Deploy Checklist — Minutare InteliClinic / climesa (Dokploy)
+
+Domínios desta instância:
+- **API**: `https://api.inteliclinic.minutarecore.space`
+- **Frontend**: `https://inteliclinic.minutarecore.space`
 
 Use este checklist na ordem apresentada. Cada item deve ser confirmado antes de avançar.
 
@@ -17,9 +21,9 @@ Use este checklist na ordem apresentada. Cada item deve ser confirmado antes de 
 
 ## 1. DNS
 
-- [ ] Criar registro A `api.suaclinica.com.br` → IP da VPS
-- [ ] Criar registro A `painel.suaclinica.com.br` → IP da VPS
-- [ ] Aguardar propagação DNS (`dig api.suaclinica.com.br`)
+- [ ] Criar registro A `api.inteliclinic.minutarecore.space` → IP da VPS
+- [ ] Criar registro A `inteliclinic.minutarecore.space` → IP da VPS
+- [ ] Aguardar propagação DNS (`dig api.inteliclinic.minutarecore.space`)
 - [ ] Confirmar que os domínios resolvem corretamente antes de subir o compose
 
 ---
@@ -58,24 +62,33 @@ git checkout main
 
 ```bash
 cp .env.vps.example .env
-nano .env   # ou editor de sua preferência
+nano .env
 ```
 
-**Variáveis obrigatórias a preencher:**
+**Variáveis obrigatórias — já preenchidas no `.env.vps.example`:**
 
-- [ ] `COMPOSE_PROJECT_NAME` — slug único (ex: `clinica-saude-sp`)
-- [ ] `FRONTEND_DOMAIN` — domínio real do painel
-- [ ] `API_DOMAIN` — domínio real da API
-- [ ] `POSTGRES_PASSWORD` — senha forte (`openssl rand -hex 32`)
-- [ ] `APP_SECRET_KEY` — chave forte (`openssl rand -hex 32`)
-- [ ] `CORS_ORIGINS` — `["https://painel.suaclinica.com.br"]`
-- [ ] `NEXT_PUBLIC_API_URL` — `https://api.suaclinica.com.br` ← **antes do build**
-- [ ] `OPENAI_API_KEY` (ou outro LLM)
-- [ ] `TELEGRAM_BOT_TOKEN`
-- [ ] `TELEGRAM_WEBHOOK_URL` — `https://api.suaclinica.com.br/api/v1/telegram/webhook`
-- [ ] `TELEGRAM_WEBHOOK_SECRET` — string aleatória (`openssl rand -hex 32`)
-- [ ] `CLINIC_ID` — slug único da clínica
-- [ ] `CLINIC_NAME` — nome da clínica
+| Variável | Valor definido |
+|---|---|
+| `COMPOSE_PROJECT_NAME` | `climesa` |
+| `FRONTEND_DOMAIN` | `inteliclinic.minutarecore.space` |
+| `API_DOMAIN` | `api.inteliclinic.minutarecore.space` |
+| `NEXT_PUBLIC_API_URL` | `https://api.inteliclinic.minutarecore.space` |
+| `POSTGRES_PASSWORD` | `ASD14200` |
+| `APP_SECRET_KEY` | `ASD14200` *(trocar por valor gerado: `openssl rand -hex 32`)* |
+| `CORS_ORIGINS` | `["https://inteliclinic.minutarecore.space"]` |
+| `LLM_PROVIDER` | `groq` |
+| `LLM_MODEL` | `llama-3.3-70b-versatile` |
+| `TELEGRAM_WEBHOOK_URL` | `https://api.inteliclinic.minutarecore.space/api/v1/telegram/webhook` |
+| `TELEGRAM_WEBHOOK_SECRET` | `ASD14200` *(trocar por valor gerado: `openssl rand -hex 32`)* |
+| `TELEGRAM_AUTO_WEBHOOK` | `true` |
+| `CLINIC_ID` | `climesa` |
+| `CLINIC_NAME` | `climesa` |
+
+**Variáveis que você DEVE preencher manualmente no `.env`:**
+
+- [ ] `GROQ_API_KEY` — chave obtida em https://console.groq.com/keys
+- [ ] `TELEGRAM_BOT_TOKEN` — token do BotFather
+- [ ] *(Opcional)* `OPENAI_API_KEY` — se quiser embeddings vetoriais no RAG
 
 ---
 
@@ -105,7 +118,7 @@ docker compose logs frontend --tail 20
 
 - [ ] `db` — status `healthy`
 - [ ] `qdrant` — status `Up` (pode demorar ~30s)
-- [ ] `api` — status `healthy` (aguardar até 90s — roda migrations + seed no start)
+- [ ] `api` — status `healthy` (aguardar até 90s — roda migrations + seed + webhook no start)
 - [ ] `frontend` — status `healthy`
 
 ---
@@ -113,11 +126,11 @@ docker compose logs frontend --tail 20
 ## 7. Volumes persistentes
 
 ```bash
-docker volume ls | grep minutare
+docker volume ls | grep climesa
 ```
 
-- [ ] Volume `minutare-*_pgdata` criado (dados PostgreSQL)
-- [ ] Volume `minutare-*_qdrant_data` criado (índices Qdrant)
+- [ ] Volume `climesa_pgdata` criado (dados PostgreSQL)
+- [ ] Volume `climesa_qdrant_data` criado (índices Qdrant)
 
 > **Crítico:** nunca apagar esses volumes em produção. Fazer backup regularmente.
 
@@ -127,13 +140,13 @@ docker volume ls | grep minutare
 
 ```bash
 # API
-curl -sf https://api.suaclinica.com.br/health
+curl -sf https://api.inteliclinic.minutarecore.space/health
 
 # DB via API
-curl -sf https://api.suaclinica.com.br/health/db
+curl -sf https://api.inteliclinic.minutarecore.space/health/db
 
 # Frontend
-curl -sf https://painel.suaclinica.com.br/api/health
+curl -sf https://inteliclinic.minutarecore.space/api/health
 ```
 
 - [ ] `GET /health` retorna `{"status":"ok","service":"minutare-med"}`
@@ -144,63 +157,98 @@ curl -sf https://painel.suaclinica.com.br/api/health
 
 ## 9. TLS / HTTPS
 
-- [ ] `https://api.suaclinica.com.br/health` responde sem erro de certificado
-- [ ] `https://painel.suaclinica.com.br` abre sem erro de certificado
+- [ ] `https://api.inteliclinic.minutarecore.space/health` responde sem erro de certificado
+- [ ] `https://inteliclinic.minutarecore.space` abre sem erro de certificado
 - [ ] Certificado Let's Encrypt emitido pelo Traefik (aguardar até 2 min após primeira requisição)
 
 ---
 
-## 10. Telegram Webhook
+## 10. Telegram Webhook (automático)
+
+Com `TELEGRAM_AUTO_WEBHOOK=true`, o webhook é registrado automaticamente no startup da API.
+Verifique nos logs da API:
 
 ```bash
-# Registrar webhook no Telegram
-curl -sf https://api.suaclinica.com.br/api/v1/telegram/set-webhook?url=https://api.suaclinica.com.br/api/v1/telegram/webhook
-
-# Verificar status do webhook
-curl -sf https://api.suaclinica.com.br/api/v1/telegram/webhook-info
+docker compose logs api | grep -i webhook
 ```
 
-- [ ] Webhook registrado com sucesso
-- [ ] `webhook-info` mostra `url` preenchida e `pending_update_count: 0`
+Deve aparecer algo como:
+```
+INFO  Webhook atual: (nenhum)
+INFO  Webhook desejado: https://api.inteliclinic.minutarecore.space/api/v1/telegram/webhook
+INFO  Webhook registrado com sucesso: https://api.inteliclinic.minutarecore.space/api/v1/telegram/webhook
+```
+
+Se já estiver correto de um deploy anterior:
+```
+INFO  Webhook já está correto — nenhuma ação necessária.
+```
+
+Para verificar o status manualmente:
+```bash
+curl -sf https://api.inteliclinic.minutarecore.space/api/v1/telegram/webhook-info
+```
+
+Para registrar manualmente (se necessário):
+```bash
+curl -X POST https://api.inteliclinic.minutarecore.space/api/v1/telegram/set-webhook \
+    -H "Content-Type: application/json" \
+    -d '{}'
+```
+
+- [ ] Logs mostram webhook registrado ou já correto
+- [ ] `webhook-info` mostra `url` preenchida
 - [ ] Enviar mensagem de teste para o bot no Telegram e verificar resposta
 
 ---
 
-## 11. RAG — Knowledge Base
+## 11. IA / Groq
+
+Verifique nos logs da API que o provider está ativo:
 
 ```bash
-# Verificar documentos ingeridos pelo seed
-curl -sf https://api.suaclinica.com.br/api/v1/rag/documents
+docker compose logs api | grep -i "groq\|llm\|provider"
+```
 
-# Testar busca RAG
-curl -X POST https://api.suaclinica.com.br/api/v1/rag/query \
+Para testar a IA via RAG:
+```bash
+curl -X POST https://api.inteliclinic.minutarecore.space/api/v1/rag/query \
     -H "Content-Type: application/json" \
     -d '{"query": "Quais convênios são aceitos?"}'
 ```
 
-- [ ] Pelo menos 1 documento listado (seed popula automaticamente)
-- [ ] Query RAG retorna resultado com `answer` preenchido
+- [ ] Nenhum erro de `GROQ_API_KEY` nos logs
+- [ ] Query RAG retorna resultado com `answer` gerado (não apenas template)
 
 ---
 
-## 12. Painel Frontend
+## 12. RAG — Knowledge Base
 
-- [ ] Abrir `https://painel.suaclinica.com.br` no browser
+```bash
+# Verificar documentos ingeridos pelo seed
+curl -sf https://api.inteliclinic.minutarecore.space/api/v1/rag/documents
+```
+
+- [ ] Pelo menos 1 documento listado (seed popula automaticamente)
+
+---
+
+## 13. Painel Frontend
+
+- [ ] Abrir `https://inteliclinic.minutarecore.space` no browser
 - [ ] Dashboard carrega sem erros de console
 - [ ] Página de Profissionais lista os profissionais do seed
 - [ ] Página de Integrações → Telegram mostra status do webhook
 
 ---
 
-## 13. Ordem de observação nos logs após subir
-
-Monitore nessa ordem:
+## 14. Ordem de observação nos logs após subir
 
 ```bash
 # 1. DB — precisa estar healthy antes de tudo
 docker compose logs db -f
 
-# 2. API — migrations + seed + start (pode levar 60-90s)
+# 2. API — migrations + seed + webhook + start (pode levar 60-90s)
 docker compose logs api -f
 
 # 3. Frontend — build standalone + start (~120s)
@@ -214,20 +262,21 @@ docker compose logs frontend -f
 | `DB not available after 60s` | POSTGRES_* vars erradas ou DB não subiu |
 | `alembic.exc.CommandError` | Migration falhou — verificar DATABASE_URL |
 | `Error: Cannot find module` | Build do Next.js incompleto — rebuild |
-| `TELEGRAM_BOT_TOKEN not set` | Variável faltando no .env |
+| `TELEGRAM_BOT_TOKEN não definido` | Variável faltando no .env |
+| `GROQ_API_KEY` ausente | LLM_PROVIDER=groq mas chave não preenchida |
 | `Signature mismatch` no webhook | TELEGRAM_WEBHOOK_SECRET incorreto |
 
 ---
 
-## 14. Backup (configurar após validação)
+## 15. Backup (configurar após validação)
 
-- [ ] Configurar backup diário do volume `pgdata`
-- [ ] Configurar backup do volume `qdrant_data` (índices vetoriais)
+- [ ] Configurar backup diário do volume `climesa_pgdata`
+- [ ] Configurar backup do volume `climesa_qdrant_data` (índices vetoriais)
 - [ ] Testar restore do backup em ambiente separado
 
 ---
 
-## 15. Atualização futura
+## 16. Atualização futura
 
 ```bash
 git pull origin main
@@ -238,3 +287,4 @@ docker compose exec api alembic upgrade head
 
 - [ ] Migrations executadas após cada atualização que contenha `alembic/versions/*`
 - [ ] Verificar health checks após restart
+- [ ] O webhook Telegram será revalidado automaticamente no próximo startup

@@ -50,6 +50,12 @@ python scripts/seed_data.py \
     --database-url "${DATABASE_URL}" \
     || echo "    Seed skipped or partially applied (non-fatal)."
 
+# Registrar webhook do Telegram automaticamente (idempotente)
+# Só executa se TELEGRAM_AUTO_WEBHOOK=true + token e URL definidos
+echo "--> Registrando webhook do Telegram (se habilitado)..."
+python scripts/register_telegram_webhook.py \
+    || echo "    Webhook Telegram: aviso ou skip (não fatal)."
+
 echo "--> Starting Uvicorn..."
 echo "    Workers: ${UVICORN_WORKERS:-1}"
 echo "    Log level: ${APP_LOG_LEVEL:-info}"

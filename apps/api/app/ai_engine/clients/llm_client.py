@@ -2,8 +2,12 @@
 LLM Client — Provider-agnostic abstraction for LLM calls.
 
 Adapted from qwen-test's llm_client.py + gemini_client.py + groq_client.py.
-Supports: OpenAI, Anthropic, Gemini (via OpenAI-compatible endpoint or native).
+Supports: Groq, OpenAI, Anthropic, Gemini (via OpenAI-compatible endpoint or native).
 Falls back gracefully when no provider is configured.
+
+Provider selection order:
+  1. settings.llm_provider (explicit) — se configurado como "groq", "openai", etc.
+  2. Auto-detect pela primeira API key disponível: Groq → OpenAI → Anthropic → Gemini
 
 Factory pattern: call_llm() picks the active provider from settings.
 """
@@ -41,7 +45,9 @@ async def call_llm(
     """
     provider = _resolve_provider()
 
-    if provider == "openai":
+    if provider == "groq":
+        return await _call_groq(messages, temperature, max_tokens, json_mode)
+    elif provider == "openai":
         return await _call_openai(messages, temperature, max_tokens, json_mode)
     elif provider == "anthropic":
         return await _call_anthropic(messages, temperature, max_tokens)
@@ -53,7 +59,31 @@ async def call_llm(
 
 
 def _resolve_provider() -> str | None:
-    """Determine which provider to use based on available keys."""
+    """
+    Determine which provider to use.
+
+    Priority:
+      1. settings.llm_provider se definido explicitamente (ex: LLM_PROVIDER=groq)
+      2. Auto-detect pela primeira API key disponível: Groq → OpenAI → Anthropic → Gemini
+    """
+    explicit = (settings.llm_provider or "").strip().lower()
+    if explicit:
+        key_map = {
+            "groq": settings.groq_api_key,
+            "openai": settings.openai_api_key,
+            "anthropic": settings.anthropic_api_key,
+            "gemini": settings.gemini_api_key,
+        }
+        if explicit not in key_map:
+            logger.warning("LLM_PROVIDER='%s' desconhecido — tentando auto-detect", explicit)
+        elif not key_map[explicit]:
+            logger.warning("LLM_PROVIDER='%s' configurado mas chave API ausente", explicit)
+        else:
+            return explicit
+
+    # Auto-detect
+    if settings.groq_api_key:
+        return "groq"
     if settings.openai_api_key:
         return "openai"
     if settings.anthropic_api_key:
@@ -61,6 +91,36 @@ def _resolve_provider() -> str | None:
     if settings.gemini_api_key:
         return "gemini"
     return None
+
+
+# ─── Groq (OpenAI-compatible) ─────────────────────────────────
+# Endpoint: https://api.groq.com/openai/v1/chat/completions
+# Default model: llama-3.3-70b-versatile
+# Docs: https://console.groq.com/docs/openai
+
+
+async def _call_groq(
+    messages: list[dict],
+    temperature: float,
+    max_tokens: int,
+    json_mode: bool,
+) -> dict[str, Any] | None:
+    """Call Groq Chat Completions API (OpenAI-compatible)."""
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.groq_api_key}",
+        "Content-Type": "application/json",
+    }
+    body: dict[str, Any] = {
+        "model": settings.llm_model or "llama-3.3-70b-versatile",
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+
+    return await _http_call(url, headers, body, provider="groq")
 
 
 # ─── OpenAI / OpenAI-compatible ───────────────────────────────
@@ -235,7 +295,8 @@ async def _http_call(
 
 def _extract_content(data: dict, provider: str) -> str:
     """Extract text content from provider-specific response format."""
-    if provider == "openai":
+    if provider in ("openai", "groq"):
+        # Groq usa o mesmo formato de resposta que OpenAI
         return data["choices"][0]["message"]["content"]
     elif provider == "anthropic":
         return data["content"][0]["text"]
