@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -40,11 +41,15 @@ async def telegram_webhook(
     return {"ok": True}
 
 
+class SetWebhookRequest(BaseModel):
+    url: str | None = None
+
+
 @router.post("/set-webhook")
-async def set_webhook(url: str | None = None) -> dict:
+async def set_webhook(body: SetWebhookRequest) -> dict:
     """Manually set the Telegram webhook URL."""
     svc = TelegramService()
-    ok = await svc.set_webhook(url)
+    ok = await svc.set_webhook(body.url)
     return {"ok": ok}
 
 
@@ -53,4 +58,7 @@ async def webhook_info() -> dict:
     """Get current Telegram webhook info."""
     svc = TelegramService()
     info = await svc.get_webhook_info()
-    return {"info": info}
+    # Return the info object directly so the frontend can consume it as a flat object
+    if isinstance(info, dict):
+        return info
+    return {}

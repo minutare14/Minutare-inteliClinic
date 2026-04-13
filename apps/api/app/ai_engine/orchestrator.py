@@ -236,6 +236,11 @@ class AIOrchestrator:
                 patient, conversation, user_text, pending
             )
 
+        if action_type == "select_slot_to_cancel":
+            return await self._handle_slot_to_cancel_selection(
+                patient, conversation, user_text, pending
+            )
+
         if action_type == "confirm_cancel":
             return await self._handle_cancel_confirmation(
                 patient, conversation, user_text, pending
@@ -338,6 +343,57 @@ class AIOrchestrator:
             guardrail_action="allow",
         )
 
+    async def _handle_slot_to_cancel_selection(
+        self,
+        patient: Patient,
+        conversation: Conversation,
+        user_text: str,
+        pending: dict,
+    ) -> EngineResponse | None:
+        """Handle user picking which appointment to cancel (multi-appointment flow)."""
+        text = user_text.strip()
+
+        cancel_words = ["cancelar", "desistir", "nao", "não", "sair", "voltar"]
+        if any(w in text.lower() for w in cancel_words):
+            await self._save_pending_action(conversation, None)
+            return EngineResponse(
+                text="Tudo bem! Nenhuma consulta foi cancelada. Posso ajudar com algo mais?",
+                intent=Intent.CANCELAR,
+                confidence=1.0,
+                guardrail_action="allow",
+            )
+
+        slot_number = self._extract_number(text)
+        slot_ids = pending.get("slot_ids", [])
+        slot_displays = pending.get("slot_displays", [])
+
+        if slot_number is None or slot_number < 1 or slot_number > len(slot_ids):
+            return EngineResponse(
+                text=f"Por favor, responda com um número de 1 a {len(slot_ids)}, "
+                     f"ou diga 'cancelar' para desistir.",
+                intent=Intent.CONFIRMACAO,
+                confidence=1.0,
+                guardrail_action="allow",
+            )
+
+        selected_id = slot_ids[slot_number - 1]
+        display = (
+            slot_displays[slot_number - 1]
+            if slot_displays and slot_number <= len(slot_displays)
+            else selected_id
+        )
+
+        await self._save_pending_action(conversation, {
+            "type": "confirm_cancel",
+            "slot_id": selected_id,
+        })
+        return EngineResponse(
+            text=f"Você selecionou:\n\n📅 {display}\n\nDeseja realmente cancelar? Responda 'sim' ou 'não'.",
+            intent=Intent.CANCELAR,
+            confidence=1.0,
+            guardrail_action="allow",
+        )
+
     def _extract_number(self, text: str) -> int | None:
         """Extract a number from user text (handles '1', 'opção 1', 'primeiro', etc.)."""
         # Direct number
@@ -409,6 +465,7 @@ class AIOrchestrator:
                 await self._save_pending_action(conversation, {
                     "type": "select_slot_to_cancel",
                     "slot_ids": slot_ids,
+                    "slot_displays": [s.display() for s in appointments.slots],
                 })
                 return "\n".join(lines)
             # No appointments found
@@ -422,7 +479,7 @@ class AIOrchestrator:
             result = await self.schedule_actions.reschedule_slot(
                 patient_id=patient.id,
                 old_date_str=entities.get("date"),
-                new_date_str=entities.get("date"),
+                new_date_str=entities.get("new_date", entities.get("date")),
             )
             if result.success and result.slots:
                 await self._save_pending_action(conversation, {

@@ -17,6 +17,7 @@ venv/
 .env.local
 .env.*
 !.env.example
+!.env.vps.example
 
 # Node / Frontend
 node_modules/

@@ -136,6 +136,8 @@ class RagService:
         return [
             RagQueryResult(
                 chunk_id=r["chunk_id"],
+                document_id=r["document_id"],
+                title=r["document_title"],
                 content=r["content"],
                 score=float(r["score"]),
                 document_title=r["document_title"],

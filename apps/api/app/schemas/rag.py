@@ -38,7 +38,9 @@ class RagQueryRequest(BaseModel):
 
 class RagQueryResult(BaseModel):
     chunk_id: uuid.UUID
+    document_id: uuid.UUID
+    title: str
     content: str
     score: float
-    document_title: str
+    document_title: str  # kept for internal use (orchestrator)
     category: str

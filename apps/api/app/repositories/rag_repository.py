@@ -59,6 +59,7 @@ class RagRepository:
         sql = text(f"""
             SELECT
                 c.id AS chunk_id,
+                d.id AS document_id,
                 c.content,
                 d.title AS document_title,
                 d.category,
@@ -102,6 +103,7 @@ class RagRepository:
         sql = text(f"""
             SELECT
                 c.id AS chunk_id,
+                d.id AS document_id,
                 c.content,
                 d.title AS document_title,
                 d.category,
@@ -118,6 +120,7 @@ class RagRepository:
         return [
             {
                 "chunk_id": str(r["chunk_id"]),
+                "document_id": str(r["document_id"]),
                 "content": r["content"],
                 "document_title": r["document_title"],
                 "category": r["category"],

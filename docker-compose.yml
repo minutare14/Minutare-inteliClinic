@@ -44,7 +44,8 @@ services:
     networks:
       - internal
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz | grep -q 'ok' || exit 1"]
+      # /healthz retorna JSON com "title":"qdrant..." — checar apenas HTTP 200
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -71,7 +72,9 @@ services:
       db:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        # Qdrant não é usado no runtime MVP (pgvector cobre o RAG atual).
+        # service_started evita bloquear o API se o Qdrant demorar.
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
       interval: 15s

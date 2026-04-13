@@ -190,14 +190,19 @@ def _parse_dates(text_norm: str) -> dict:
                 break
 
     # Absolute dates: DD/MM or DD/MM/YYYY
-    date_match = re.search(r"(\d{1,2})[/\-](\d{1,2})(?:[/\-](\d{2,4}))?", text_norm)
-    if date_match and "date" not in result:
+    # Find all date matches so we can detect two dates (e.g. rescheduling: "de 10/04 para 20/04")
+    all_date_matches = list(re.finditer(r"(\d{1,2})[/\-](\d{1,2})(?:[/\-](\d{2,4}))?", text_norm))
+    for i, date_match in enumerate(all_date_matches[:2]):
         day, month = int(date_match.group(1)), int(date_match.group(2))
         year = int(date_match.group(3)) if date_match.group(3) else today.year
         if year < 100:
             year += 2000
         try:
-            result["date"] = datetime(year, month, day).date().strftime("%Y-%m-%d")
+            parsed = datetime(year, month, day).date().strftime("%Y-%m-%d")
+            if i == 0 and "date" not in result:
+                result["date"] = parsed
+            elif i == 1 and "date" in result:
+                result["new_date"] = parsed
         except ValueError:
             pass
 
