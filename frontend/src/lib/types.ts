@@ -131,6 +131,12 @@ export interface TelegramWebhookInfo {
   last_error_message?: string;
 }
 
+export interface TelegramStatus {
+  token_configured: boolean;
+  computed_webhook_url: string;
+  webhook_info: TelegramWebhookInfo | null;
+}
+
 export interface ProfessionalCreate {
   full_name: string;
   specialty: string;

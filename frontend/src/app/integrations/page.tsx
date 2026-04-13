@@ -1,37 +1,37 @@
 "use client";
 import { useState } from "react";
 import { useFetch } from "@/hooks/use-fetch";
-import { getTelegramWebhookInfo, setTelegramWebhook } from "@/lib/api";
+import { getTelegramStatus, reconfigureTelegramWebhook } from "@/lib/api";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { LoadingState } from "@/components/ui/loading-state";
 
 export default function IntegrationsPage() {
-  const { data: webhook, loading, error, refetch } = useFetch(() =>
-    getTelegramWebhookInfo().catch(() => null)
+  const { data: status, loading, error, refetch } = useFetch(() =>
+    getTelegramStatus().catch(() => null)
   );
-  const [newUrl, setNewUrl] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [reconfiguring, setReconfiguring] = useState(false);
+  const [actionMsg, setActionMsg] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  const handleSetWebhook = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newUrl.trim()) return;
-    setSaving(true);
-    setSaveMsg(null);
+  const handleReconfigure = async () => {
+    setReconfiguring(true);
+    setActionMsg(null);
     try {
-      await setTelegramWebhook(newUrl.trim());
-      setSaveMsg({ ok: true, msg: "Webhook configurado com sucesso!" });
-      setNewUrl("");
+      const result = await reconfigureTelegramWebhook();
+      setActionMsg({ ok: true, msg: `Webhook reconfigurado: ${result.url}` });
       refetch();
     } catch (err: unknown) {
-      setSaveMsg({ ok: false, msg: err instanceof Error ? err.message : "Erro ao configurar webhook" });
+      setActionMsg({
+        ok: false,
+        msg: err instanceof Error ? err.message : "Erro ao reconfigurar webhook",
+      });
     } finally {
-      setSaving(false);
+      setReconfiguring(false);
     }
   };
 
-  const inputCls = "w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
+  const webhook = status?.webhook_info;
+  const isConnected = !!(status?.token_configured && webhook?.url);
 
   return (
     <div>
@@ -43,13 +43,14 @@ export default function IntegrationsPage() {
       {loading && <LoadingState />}
 
       <div className="mt-4 space-y-4">
-        {/* Telegram Status */}
+        {/* Telegram */}
         <Card>
           <CardBody>
+            {/* Header */}
             <div className="flex items-center gap-3 mb-4">
               <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
                 <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.96 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
                 </svg>
               </div>
               <div>
@@ -57,24 +58,53 @@ export default function IntegrationsPage() {
                 <p className="text-xs text-gray-500">Canal principal de atendimento ao paciente</p>
               </div>
               <div className="ml-auto">
-                <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full ${webhook?.url ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${webhook?.url ? "bg-green-500" : "bg-gray-400"}`} />
-                  {webhook?.url ? "Webhook ativo" : "Não configurado"}
+                <span
+                  className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full ${
+                    isConnected ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                  }`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${
+                      isConnected ? "bg-green-500" : "bg-gray-400"
+                    }`}
+                  />
+                  {isConnected ? "Conectado" : "Não configurado"}
                 </span>
               </div>
             </div>
 
-            {webhook && (
+            {/* Status details */}
+            {status && (
               <dl className="space-y-2 text-sm mb-4">
+                <div className="flex justify-between items-center gap-4">
+                  <dt className="text-gray-500 whitespace-nowrap">Token configurado</dt>
+                  <dd className={status.token_configured ? "text-green-600 font-medium" : "text-red-500"}>
+                    {status.token_configured ? "Sim" : "Não — defina TELEGRAM_BOT_TOKEN no env"}
+                  </dd>
+                </div>
+
                 <div className="flex justify-between items-start gap-4">
-                  <dt className="text-gray-500 whitespace-nowrap">URL do webhook</dt>
-                  <dd className="font-mono text-xs text-gray-700 break-all text-right">{webhook.url || "—"}</dd>
+                  <dt className="text-gray-500 whitespace-nowrap">URL do webhook (derivada)</dt>
+                  <dd className="font-mono text-xs text-gray-700 break-all text-right">
+                    {status.computed_webhook_url || "— defina API_DOMAIN ou TELEGRAM_WEBHOOK_URL"}
+                  </dd>
                 </div>
-                <div className="flex justify-between">
-                  <dt className="text-gray-500">Atualizações pendentes</dt>
-                  <dd className="text-gray-700">{webhook.pending_update_count ?? 0}</dd>
-                </div>
-                {webhook.last_error_message && (
+
+                {webhook?.url && (
+                  <div className="flex justify-between items-start gap-4">
+                    <dt className="text-gray-500 whitespace-nowrap">URL registrada no Telegram</dt>
+                    <dd className="font-mono text-xs text-gray-700 break-all text-right">{webhook.url}</dd>
+                  </div>
+                )}
+
+                {webhook && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-500">Atualizações pendentes</dt>
+                    <dd className="text-gray-700">{webhook.pending_update_count ?? 0}</dd>
+                  </div>
+                )}
+
+                {webhook?.last_error_message && (
                   <div className="flex justify-between items-start gap-4">
                     <dt className="text-red-500 whitespace-nowrap">Último erro</dt>
                     <dd className="text-red-600 text-xs text-right">{webhook.last_error_message}</dd>
@@ -85,36 +115,36 @@ export default function IntegrationsPage() {
 
             {error && (
               <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-700 mb-4">
-                Não foi possível obter informações do webhook. Verifique o token do Telegram.
+                Não foi possível obter o status da integração. Verifique o token do Telegram e o env da API.
               </div>
             )}
 
-            <div className="border-t border-gray-100 pt-4">
-              <h4 className="text-xs font-semibold text-gray-700 mb-3">Configurar webhook</h4>
-              <form onSubmit={handleSetWebhook} className="flex gap-2">
-                <input
-                  className={`${inputCls} flex-1`}
-                  value={newUrl}
-                  onChange={(e) => setNewUrl(e.target.value)}
-                  placeholder="https://bot.suaclinica.com.br/api/v1/telegram/webhook"
-                  type="url"
-                />
-                <button
-                  type="submit"
-                  disabled={saving || !newUrl.trim()}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap"
-                >
-                  {saving ? "Salvando..." : "Configurar"}
-                </button>
-              </form>
-              {saveMsg && (
-                <p className={`text-xs mt-2 ${saveMsg.ok ? "text-green-600" : "text-red-600"}`}>{saveMsg.msg}</p>
+            {/* Action */}
+            <div className="border-t border-gray-100 pt-4 flex items-center gap-3">
+              <button
+                onClick={handleReconfigure}
+                disabled={reconfiguring || !status?.token_configured || !status?.computed_webhook_url}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+              >
+                {reconfiguring ? "Reconfigurando..." : "Reconfigurar webhook"}
+              </button>
+              {actionMsg && (
+                <p className={`text-xs ${actionMsg.ok ? "text-green-600" : "text-red-600"}`}>
+                  {actionMsg.msg}
+                </p>
               )}
             </div>
+
+            {(!status?.token_configured || !status?.computed_webhook_url) && !loading && (
+              <p className="text-xs text-gray-400 mt-2">
+                Para autoconfigurar, defina <code className="bg-gray-100 px-1 rounded">TELEGRAM_BOT_TOKEN</code> e{" "}
+                <code className="bg-gray-100 px-1 rounded">API_DOMAIN</code> no env e reinicie o sistema.
+              </p>
+            )}
           </CardBody>
         </Card>
 
-        {/* Future integrations placeholder */}
+        {/* WhatsApp placeholder */}
         <Card>
           <CardBody>
             <div className="flex items-center gap-3 opacity-40">
@@ -132,6 +162,7 @@ export default function IntegrationsPage() {
           </CardBody>
         </Card>
 
+        {/* Voice placeholder */}
         <Card>
           <CardBody>
             <div className="flex items-center gap-3 opacity-40">

@@ -1,23 +1,25 @@
 """
 register_telegram_webhook.py — Registro automático e idempotente do webhook do Telegram.
 
-Chamado pelo entrypoint.sh se TELEGRAM_AUTO_WEBHOOK=true.
+Chamado pelo entrypoint.sh no startup.
 
 Lógica:
-  1. Verifica se TELEGRAM_BOT_TOKEN e TELEGRAM_WEBHOOK_URL estão definidos.
-  2. Consulta o webhook atual via getWebhookInfo.
-  3. Só chama setWebhook se a URL atual for diferente da configurada.
-  4. Inclui o secret token se TELEGRAM_WEBHOOK_SECRET estiver definido.
-  5. Retorna exit code 0 em sucesso/skip, 1 em falha crítica.
+  1. Verifica se TELEGRAM_BOT_TOKEN está definido.
+  2. Deriva a URL do webhook de API_DOMAIN se TELEGRAM_WEBHOOK_URL não estiver definida.
+     URL derivada: https://{API_DOMAIN}/api/v1/telegram/webhook
+  3. Consulta o webhook atual via getWebhookInfo.
+  4. Só chama setWebhook se a URL atual for diferente da desejada.
+  5. Inclui o secret token se TELEGRAM_WEBHOOK_SECRET estiver definido.
+  6. Retorna exit code 0 em sucesso/skip, 1 em falha crítica.
 
 Uso:
   python scripts/register_telegram_webhook.py
 
 Variáveis lidas do ambiente:
-  TELEGRAM_BOT_TOKEN        — obrigatória
-  TELEGRAM_WEBHOOK_URL      — obrigatória
+  TELEGRAM_BOT_TOKEN        — obrigatória para executar
+  API_DOMAIN                — usado para derivar URL (ex: api.clinica.com.br)
+  TELEGRAM_WEBHOOK_URL      — opcional; se definida, sobrepõe API_DOMAIN
   TELEGRAM_WEBHOOK_SECRET   — opcional mas recomendada
-  TELEGRAM_AUTO_WEBHOOK     — deve ser "true" para executar (guarda)
 """
 from __future__ import annotations
 
@@ -36,6 +38,17 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
 def _api(method: str, token: str) -> str:
     return f"{TELEGRAM_API.format(token=token)}/{method}"
+
+
+def _resolve_webhook_url() -> str:
+    """Retorna a URL do webhook: explícita tem prioridade; senão, deriva de API_DOMAIN."""
+    explicit = os.environ.get("TELEGRAM_WEBHOOK_URL", "").strip()
+    if explicit and explicit not in ("[PREENCHER]", ""):
+        return explicit
+    domain = os.environ.get("API_DOMAIN", "").strip()
+    if domain and domain not in ("[PREENCHER]", ""):
+        return f"https://{domain}/api/v1/telegram/webhook"
+    return ""
 
 
 async def get_current_webhook(token: str) -> str | None:
@@ -74,22 +87,20 @@ async def set_webhook(token: str, url: str, secret: str | None) -> bool:
 
 
 async def main() -> int:
-    auto = os.environ.get("TELEGRAM_AUTO_WEBHOOK", "false").strip().lower()
-    if auto != "true":
-        logger.info("TELEGRAM_AUTO_WEBHOOK não está habilitado — pulando registro do webhook.")
-        return 0
-
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    webhook_url = os.environ.get("TELEGRAM_WEBHOOK_URL", "").strip()
-    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip() or None
-
     if not token or token == "[PREENCHER]":
-        logger.warning("TELEGRAM_BOT_TOKEN não definido ou com placeholder — pulando.")
+        logger.info("TELEGRAM_BOT_TOKEN não definido — pulando registro do webhook.")
         return 0
 
-    if not webhook_url or webhook_url == "[PREENCHER]":
-        logger.warning("TELEGRAM_WEBHOOK_URL não definido ou com placeholder — pulando.")
+    webhook_url = _resolve_webhook_url()
+    if not webhook_url:
+        logger.warning(
+            "Não foi possível determinar a URL do webhook. "
+            "Defina API_DOMAIN ou TELEGRAM_WEBHOOK_URL."
+        )
         return 0
+
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip() or None
 
     current = await get_current_webhook(token)
     logger.info("Webhook atual: %s", current or "(nenhum)")

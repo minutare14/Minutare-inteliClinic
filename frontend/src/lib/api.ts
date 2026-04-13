@@ -15,6 +15,7 @@ import type {
   RagIngestRequest,
   RagQueryResult,
   TelegramWebhookInfo,
+  TelegramStatus,
 } from "./types";
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -145,7 +146,10 @@ export const queryRag = (query: string, top_k = 5, category?: string) => {
 export const getTelegramWebhookInfo = () =>
   fetchApi<TelegramWebhookInfo>(`${API_PREFIX}/telegram/webhook-info`);
 
-export const setTelegramWebhook = (url: string) =>
-  fetchApi<{ ok: boolean; description?: string }>(`${API_PREFIX}/telegram/set-webhook`, {
-    method: 'POST', body: JSON.stringify({ url }),
+export const getTelegramStatus = () =>
+  fetchApi<TelegramStatus>(`${API_PREFIX}/telegram/status`);
+
+export const reconfigureTelegramWebhook = () =>
+  fetchApi<{ ok: boolean; url: string }>(`${API_PREFIX}/telegram/reconfigure-webhook`, {
+    method: 'POST',
   });

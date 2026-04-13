@@ -22,9 +22,24 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     telegram_bot_token: str = ""
-    telegram_webhook_url: str = ""
+    telegram_webhook_url: str = ""  # explícita; se vazia, derivada de api_domain
     telegram_webhook_secret: str = ""
-    telegram_auto_webhook: bool = False  # se True, registra webhook automaticamente no startup
+
+    # --- Domínio público da API (usado para derivar URL do webhook) ---
+    api_domain: str = ""  # ex: "api.inteliclinic.minutarecore.space"
+
+    @property
+    def telegram_webhook_computed_url(self) -> str:
+        """URL do webhook: valor explícito tem prioridade; senão, deriva de api_domain."""
+        if self.telegram_webhook_url:
+            return self.telegram_webhook_url
+        if self.api_domain:
+            return f"https://{self.api_domain}/api/v1/telegram/webhook"
+        return ""
+
+    @property
+    def telegram_token_configured(self) -> bool:
+        return bool(self.telegram_bot_token and self.telegram_bot_token not in ("", "[PREENCHER]"))
 
     # --- AI / LLM ---
     llm_provider: str = ""  # groq | openai | anthropic | gemini (empty = auto-detect from keys)
