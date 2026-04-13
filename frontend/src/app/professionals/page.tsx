@@ -67,7 +67,7 @@ export default function ProfessionalsPage() {
                   <td className="px-4 py-3 text-gray-600">{prof.specialty}</td>
                   <td className="px-4 py-3 font-mono text-xs text-gray-500">{prof.crm}</td>
                   <td className="px-4 py-3">
-                    <Badge color={prof.active ? "green" : "gray"}>{prof.active ? "Ativo" : "Inativo"}</Badge>
+                    <Badge variant={prof.active ? "green" : "gray"}>{prof.active ? "Ativo" : "Inativo"}</Badge>
                   </td>
                   <td className="px-4 py-3 text-gray-500">{new Date(prof.created_at).toLocaleDateString("pt-BR")}</td>
                   <td className="px-4 py-3 text-right">
