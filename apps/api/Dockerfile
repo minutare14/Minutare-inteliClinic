@@ -44,6 +44,6 @@ RUN chmod +x ./entrypoint.sh
 EXPOSE 8741
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
-    CMD wget -q --spider http://127.0.0.1:8741/health || exit 1
+    CMD curl -sf http://127.0.0.1:8741/health || exit 1
 
 ENTRYPOINT ["./entrypoint.sh"]

@@ -44,12 +44,14 @@ services:
     networks:
       - internal
     healthcheck:
-      # /healthz retorna JSON com "title":"qdrant..." — checar apenas HTTP 200
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/healthz || exit 1"]
-      interval: 10s
+      # A imagem qdrant/qdrant não tem wget nem curl — usar /bin/true para evitar
+      # falhas infinitas de healthcheck. Qdrant não é usado no runtime MVP (pgvector
+      # cobre o RAG atual) e o api já depende dele com service_started.
+      test: ["CMD", "/bin/true"]
+      interval: 30s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # ── API FastAPI ────────────────────────────────────────────────
@@ -77,7 +79,7 @@ services:
         # service_started evita bloquear o API se o Qdrant demorar.
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8741/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8741/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
