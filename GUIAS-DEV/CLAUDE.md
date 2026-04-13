@@ -64,8 +64,7 @@
 - `Evidencia`: bootstrap da API com migracao + seed a cada start (`apps/api/entrypoint.sh`).
 - `Evidencia`: ingestao de mensagem Telegram ponta a ponta (`apps/api/app/integrations/telegram/webhook_handler.py`).
 - `Evidencia`: pipeline de agendamento via `AIOrchestrator` + `ScheduleActions`.
-- `Evidencia`: pipeline de cancelamento via `AIOrchestrator` + `ScheduleActions` — selecao de slot em cancelamento multi-consulta CORRIGIDO em 2026-04-13.
-- `Evidencia`: pipeline de remarcacao via `AIOrchestrator` + `ScheduleActions` — separacao de datas CORRIGIDA em 2026-04-13.
+- `Evidencia`: pipeline de cancelamento via `AIOrchestrator` + `ScheduleActions`.
 - `Evidencia`: pipeline de handoff humano por baixa confianca, falta de consentimento, urgencia ou pedido explicito.
 - `Evidencia`: pipeline de auditoria minima por evento.
 - `Evidencia`: pipeline de ingestao de RAG via API (`POST /api/v1/rag/ingest`) e via script (`scripts/ingest_docs.py`).
@@ -207,20 +206,21 @@
 COMPOSE_PROJECT_NAME, FRONTEND_DOMAIN, API_DOMAIN
 POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 APP_ENV=production, APP_SECRET_KEY, CORS_ORIGINS
-NEXT_PUBLIC_API_URL  <- antes do build
+NEXT_PUBLIC_API_URL  ← antes do build
 OPENAI_API_KEY (ou outro LLM)
 TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_URL, TELEGRAM_WEBHOOK_SECRET
 CLINIC_ID, CLINIC_NAME
 ```
 
 ### Variaveis injetadas automaticamente pelo compose (nao definir manualmente)
-- `DATABASE_URL` -> `postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}`
-- `QDRANT_URL` -> `http://qdrant:6333`
+- `DATABASE_URL` → `postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}`
+- `QDRANT_URL` → `http://qdrant:6333`
 
 ## Recomendacoes Futuras
 - Extrair `clinic_id` para todas as entidades operacionais relevantes e filtrar tudo por tenant.
 - Trocar todos os hardcodes de Minutare Med por configuracao de clinica ou branding injetado.
 - Unificar o caminho principal de IA: ou promover `src/inteliclinic` para runtime real, ou simplificar docs/arquitetura para o que realmente roda.
+- Corrigir os contratos frontend/backend de Telegram e RAG.
 - Implementar auth minima antes de qualquer deploy publico do painel.
 - Definir governanca de prompts e KB por clinica com versionamento.
 
@@ -246,5 +246,3 @@ CLINIC_ID, CLINIC_NAME
 - `scripts/evaluate_rag.py`
 - `docs/architecture/core-vs-clinic.md`
 - `docs/clinic-onboarding/new-clinic.md`
-- `docs/deployment/ENV_REFERENCE.md`
-- `docs/deployment/VPS_DEPLOY_CHECKLIST.md`
