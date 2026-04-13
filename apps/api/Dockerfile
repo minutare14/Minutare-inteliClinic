@@ -5,11 +5,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps: build tools, libpq (asyncpg), curl (healthcheck)
+# System deps: build tools, libpq (asyncpg), postgresql-client (pg_isready), curl/wget (healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    postgresql-client \
     curl \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps — cached layer, only rebuilds when pyproject.toml changes
