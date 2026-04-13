@@ -24,10 +24,18 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Minutare Med API starting (env=%s)", settings.app_env)
+    
+    # ── Logs explícitos de Startup ──
+    provider = settings.llm_provider or "auto-detect"
+    logger.info("AI Provider configurado: %s", provider)
+    logger.info("Telegram Webhook URL configurado: %s", settings.telegram_webhook_url or "nenhum")
+    
     if settings.database_url.startswith("sqlite"):
         from app.core.db import init_db
         await init_db()
         logger.info("SQLite tables created (dev mode)")
+        
+    logger.info("API Startup completo. Aguardando conexões.")
     yield
     logger.info("Minutare Med API shutting down")
 

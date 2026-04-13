@@ -77,7 +77,7 @@ services:
         # service_started evita bloquear o API se o Qdrant demorar.
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8741/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8741/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -113,7 +113,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3741/api/health | grep -q 'ok' || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health | grep -q 'ok' || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -123,7 +123,7 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-frontend.rule=Host(`${FRONTEND_DOMAIN}`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-frontend.entrypoints=websecure"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-frontend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.${COMPOSE_PROJECT_NAME:-minutare}-frontend.loadbalancer.server.port=3741"
+      - "traefik.http.services.${COMPOSE_PROJECT_NAME:-minutare}-frontend.loadbalancer.server.port=3000"
       - "traefik.docker.network=dokploy-network"
     restart: unless-stopped
 

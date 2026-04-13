@@ -83,12 +83,12 @@ async def main() -> int:
     webhook_url = os.environ.get("TELEGRAM_WEBHOOK_URL", "").strip()
     secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip() or None
 
-    if not token:
-        logger.warning("TELEGRAM_BOT_TOKEN não definido — pulando.")
+    if not token or token == "[PREENCHER]":
+        logger.warning("TELEGRAM_BOT_TOKEN não definido ou com placeholder — pulando.")
         return 0
 
-    if not webhook_url:
-        logger.warning("TELEGRAM_WEBHOOK_URL não definido — pulando.")
+    if not webhook_url or webhook_url == "[PREENCHER]":
+        logger.warning("TELEGRAM_WEBHOOK_URL não definido ou com placeholder — pulando.")
         return 0
 
     current = await get_current_webhook(token)
