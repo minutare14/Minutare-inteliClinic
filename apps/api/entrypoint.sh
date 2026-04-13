@@ -63,7 +63,7 @@ echo "======================================================"
 
 exec uvicorn app.main:app \
     --host 0.0.0.0 \
-    --port 8000 \
+    --port "${UVICORN_PORT:-8741}" \
     --workers "${UVICORN_WORKERS:-1}" \
     --log-level "${APP_LOG_LEVEL:-info}" \
     --no-access-log

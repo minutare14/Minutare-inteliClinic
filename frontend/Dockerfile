@@ -39,11 +39,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
 
-EXPOSE 3000
-ENV PORT=3000
+EXPOSE 3741
+ENV PORT=3741
 ENV HOSTNAME="0.0.0.0"
 
 HEALTHCHECK --interval=15s --timeout=10s --start-period=90s --retries=5 \
-    CMD wget -qO- http://localhost:3000/api/health | grep -q '"status":"ok"' || exit 1
+    CMD wget -qO- http://localhost:3741/api/health | grep -q '"status":"ok"' || exit 1
 
 CMD ["node", "server.js"]

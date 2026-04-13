@@ -39,9 +39,9 @@ COPY scripts/ ./scripts/
 COPY apps/api/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
-EXPOSE 8000
+EXPOSE 8741
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
-    CMD curl -sf http://localhost:8000/health || exit 1
+    CMD curl -sf http://localhost:8741/health || exit 1
 
 ENTRYPOINT ["./entrypoint.sh"]
