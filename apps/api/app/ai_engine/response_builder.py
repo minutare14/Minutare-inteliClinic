@@ -165,19 +165,40 @@ async def generate_response(
     Returns:
         Response text to send to user
     """
-    # Check if LLM is available
+    # Check if LLM is available (any configured provider)
     llm_available = bool(
-        settings.openai_api_key or settings.anthropic_api_key or settings.gemini_api_key
+        settings.groq_api_key or settings.openai_api_key
+        or settings.anthropic_api_key or settings.gemini_api_key
     )
 
     if llm_available:
+        provider = _detect_active_provider()
+        logger.info("[LLM] Provider ativo: %s — chamando LLM", provider)
         try:
             return await _generate_llm_response(context, user_text, faro, rag_results)
         except Exception:
-            logger.exception("LLM response generation failed, falling back to templates")
+            logger.exception("[LLM] Falha na geração — fallback para template (provider=%s)", provider)
+    else:
+        logger.warning("[LLM] Nenhum provider configurado — usando template (intent=%s)", faro.intent.value)
 
     # Template-based fallback
     return _generate_template_response(context, user_text, faro, rag_results)
+
+
+def _detect_active_provider() -> str:
+    """Return the name of the currently active LLM provider (for logging)."""
+    explicit = (settings.llm_provider or "").strip().lower()
+    if explicit:
+        return explicit
+    if settings.groq_api_key:
+        return "groq"
+    if settings.openai_api_key:
+        return "openai"
+    if settings.anthropic_api_key:
+        return "anthropic"
+    if settings.gemini_api_key:
+        return "gemini"
+    return "none"
 
 
 async def _generate_llm_response(

@@ -96,7 +96,7 @@ INTENT_KEYWORDS: dict[str, list[str]] = {
     ],
     "saudacao": [
         "oi", "ola", "bom dia", "boa tarde", "boa noite",
-        "hey", "hello",
+        "hey", "hello", "/start", "start", "comecar", "iniciar",
     ],
 }
 

@@ -45,7 +45,10 @@ async def handle_telegram_update(update: TelegramUpdate, session: AsyncSession) 
         logger.warning("Incomplete update: %d", update.update_id)
         return
 
-    logger.info("Processing message from user %s: %s", user_id, text[:80])
+    logger.info(
+        "[TELEGRAM] Mensagem recebida | user=%s chat=%s texto=%r",
+        user_id, chat_id, text[:120],
+    )
 
     # 1. Get or create patient
     patient_svc = PatientService(session)
@@ -72,9 +75,10 @@ async def handle_telegram_update(update: TelegramUpdate, session: AsyncSession) 
     )
 
     logger.info(
-        "Engine result: intent=%s confidence=%.2f guardrail=%s handoff=%s",
+        "[TELEGRAM] Resultado do engine | intent=%s confidence=%.2f guardrail=%s handoff=%s resposta=%r",
         result.intent.value, result.confidence,
         result.guardrail_action, result.handoff_created,
+        result.text[:120],
     )
 
     # 5. Send response back to Telegram

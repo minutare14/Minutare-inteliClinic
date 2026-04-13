@@ -38,7 +38,12 @@ class PatientService:
     async def get_or_create_from_telegram(
         self, telegram_user_id: str, telegram_chat_id: str, first_name: str
     ) -> Patient:
-        """Find patient by Telegram user ID, or create a stub record."""
+        """Find patient by Telegram user ID, or create a stub record.
+
+        Telegram users are created with consented_ai=True because the act of
+        actively messaging a clinic bot on Telegram is an implicit consent to
+        AI-assisted service. Consent can be revoked later via settings.
+        """
         patient = await self.repo.get_by_telegram_user_id(telegram_user_id)
         if patient:
             return patient
@@ -47,6 +52,7 @@ class PatientService:
             telegram_user_id=telegram_user_id,
             telegram_chat_id=telegram_chat_id,
             preferred_channel="telegram",
+            consented_ai=True,  # Implicit consent: user chose to contact the clinic via this bot
         )
         return await self.create_patient(data)
 

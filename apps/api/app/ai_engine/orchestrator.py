@@ -108,8 +108,13 @@ class AIOrchestrator:
             confidence=faro.confidence,
             consented_ai=patient.consented_ai,
         )
+        logger.info(
+            "[GUARDRAIL-PRE] action=%s reason=%s consented_ai=%s confidence=%.2f",
+            pre_guard.action.value, pre_guard.reason, patient.consented_ai, faro.confidence,
+        )
 
         if pre_guard.action == GuardrailAction.BLOCK:
+            logger.warning("[GUARDRAIL-PRE] BLOQUEADO — prompt injection detectado")
             return EngineResponse(
                 text=pre_guard.modified_response,
                 intent=faro.intent,
@@ -119,6 +124,10 @@ class AIOrchestrator:
             )
 
         if pre_guard.action == GuardrailAction.FORCE_HANDOFF and pre_guard.reason == "no_ai_consent":
+            logger.warning(
+                "[GUARDRAIL-PRE] HANDOFF por falta de consentimento — patient_id=%s",
+                patient.id,
+            )
             await self._create_handoff(
                 conversation.id, user_text, faro, reason="no_ai_consent"
             )
@@ -133,6 +142,7 @@ class AIOrchestrator:
 
         # ── Step 4: Execute real actions ───────────────────────
         action_response = await self._execute_action(patient, conversation, faro)
+        logger.info("[ACTION] action_response=%s", "sim" if action_response is not None else "nenhuma")
         if action_response is not None:
             post_guard = evaluate_guardrails(
                 user_text=user_text,
@@ -155,17 +165,23 @@ class AIOrchestrator:
             rag_results = await self._query_rag(user_text)
 
         # ── Step 6: Generate response ──────────────────────────
+        logger.info("[LLM] Chamando generate_response — intent=%s rag=%s", faro.intent.value, bool(rag_results))
         raw_response = await generate_response(
             context=context,
             user_text=user_text,
             faro=faro,
             rag_results=rag_results,
         )
+        logger.info("[LLM] Resposta gerada: %r", raw_response[:120])
 
         # ── Step 7: Post-response guardrails ───────────────────
         effective_confidence = (
             faro.confidence if faro.intent == Intent.DESCONHECIDA
             else max(faro.confidence, 0.80)
+        )
+        logger.info(
+            "[GUARDRAIL-POST] effective_confidence=%.2f (faro=%.2f intent=%s)",
+            effective_confidence, faro.confidence, faro.intent.value,
         )
         post_guard = evaluate_guardrails(
             user_text=user_text,
@@ -178,6 +194,10 @@ class AIOrchestrator:
         handoff_created = False
 
         if post_guard.action == GuardrailAction.FORCE_HANDOFF:
+            logger.warning(
+                "[GUARDRAIL-POST] HANDOFF — reason=%s confidence=%.2f",
+                post_guard.reason, effective_confidence,
+            )
             await self._create_handoff(
                 conversation.id, user_text, faro, reason=post_guard.reason or "low_confidence"
             )
