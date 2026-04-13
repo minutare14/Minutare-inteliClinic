@@ -61,9 +61,12 @@ echo "    Workers: ${UVICORN_WORKERS:-1}"
 echo "    Log level: ${APP_LOG_LEVEL:-info}"
 echo "======================================================"
 
+# Ensure log-level is lowercase to avoid uvicorn 'Invalid choice' crash
+LOG_LEVEL_LOWER=$(echo "${APP_LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')
+
 exec uvicorn app.main:app \
     --host 0.0.0.0 \
     --port "${UVICORN_PORT:-8741}" \
     --workers "${UVICORN_WORKERS:-1}" \
-    --log-level "${APP_LOG_LEVEL:-info}" \
+    --log-level "${LOG_LEVEL_LOWER}" \
     --no-access-log
