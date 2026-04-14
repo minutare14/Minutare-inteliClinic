@@ -27,8 +27,10 @@ async def lifespan(app: FastAPI):
     
     # ── Logs explícitos de Startup ──
     provider = settings.llm_provider or "auto-detect"
+    logger.info("Clínica: %s (id=%s)", settings.clinic_name, settings.clinic_id)
+    logger.info("Chatbot name: %s", settings.clinic_chatbot_name or "Assistente")
     logger.info("AI Provider configurado: %s", provider)
-    logger.info("Telegram Webhook URL configurado: %s", settings.telegram_webhook_url or "nenhum")
+    logger.info("Telegram Webhook URL configurado: %s", settings.telegram_webhook_computed_url or "nenhum")
     
     if settings.database_url.startswith("sqlite"):
         from app.core.db import init_db

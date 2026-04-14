@@ -194,15 +194,25 @@ class AIOrchestrator:
         handoff_created = False
 
         if post_guard.action == GuardrailAction.FORCE_HANDOFF:
-            logger.warning(
-                "[GUARDRAIL-POST] HANDOFF — reason=%s confidence=%.2f",
-                post_guard.reason, effective_confidence,
-            )
-            await self._create_handoff(
-                conversation.id, user_text, faro, reason=post_guard.reason or "low_confidence"
-            )
-            handoff_created = True
-            final_text = post_guard.modified_response
+            if post_guard.reason == "low_confidence":
+                # Não fazer handoff automático por baixa confiança — usar resposta de clarificação.
+                # Handoff automático por confiança cria experiência ruim: o usuário fica sem resposta
+                # em qualquer mensagem não reconhecida, incluindo continuações multi-turn.
+                logger.info(
+                    "[GUARDRAIL-POST] low_confidence (%.2f) — usando resposta de clarificação, sem handoff",
+                    effective_confidence,
+                )
+                final_text = raw_response  # LLM ou template DESCONHECIDA já lida corretamente
+            else:
+                logger.warning(
+                    "[GUARDRAIL-POST] HANDOFF — reason=%s confidence=%.2f",
+                    post_guard.reason, effective_confidence,
+                )
+                await self._create_handoff(
+                    conversation.id, user_text, faro, reason=post_guard.reason or "low_confidence"
+                )
+                handoff_created = True
+                final_text = post_guard.modified_response
 
         # Explicit handoff request
         if faro.intent == Intent.FALAR_COM_HUMANO and not handoff_created:
@@ -263,6 +273,11 @@ class AIOrchestrator:
 
         if action_type == "confirm_cancel":
             return await self._handle_cancel_confirmation(
+                patient, conversation, user_text, pending
+            )
+
+        if action_type == "awaiting_schedule_date":
+            return await self._handle_awaiting_schedule_date(
                 patient, conversation, user_text, pending
             )
 
@@ -414,6 +429,72 @@ class AIOrchestrator:
             guardrail_action="allow",
         )
 
+    async def _handle_awaiting_schedule_date(
+        self,
+        patient: Patient,
+        conversation: Conversation,
+        user_text: str,
+        pending: dict,
+    ) -> EngineResponse | None:
+        """
+        Handle follow-up message providing date/time for a pending scheduling request.
+        Preserves specialty/doctor from previous turn.
+        """
+        cancel_words = ["cancelar", "desistir", "nao", "não", "sair", "voltar"]
+        if any(w in user_text.strip().lower() for w in cancel_words):
+            await self._save_pending_action(conversation, None)
+            return EngineResponse(
+                text="Tudo bem! Agendamento cancelado. Posso ajudar com algo mais?",
+                intent=Intent.AGENDAR,
+                confidence=1.0,
+                guardrail_action="allow",
+            )
+
+        # Re-analyze the follow-up message to extract date/time
+        faro = intent_router.analyze(user_text)
+        date_str = faro.entities.get("date")
+        time_str = faro.entities.get("time")
+
+        # If still no date, prompt again
+        if not date_str:
+            return EngineResponse(
+                text="Por favor, informe uma data. Exemplo: 'amanhã', 'segunda-feira' ou '20/04'.",
+                intent=Intent.AGENDAR,
+                confidence=1.0,
+                guardrail_action="allow",
+            )
+
+        # Recover specialty/doctor from pending context
+        specialty = pending.get("specialty")
+        doctor_name = pending.get("doctor_name")
+
+        logger.info(
+            "[MULTI-TURN] Continuando agendamento — specialty=%s doctor=%s date=%s",
+            specialty, doctor_name, date_str,
+        )
+
+        result = await self.schedule_actions.search_slots(
+            specialty=specialty,
+            doctor_name=doctor_name,
+            date_str=date_str,
+            time_str=time_str,
+        )
+
+        if result.success and result.slots:
+            await self._save_pending_action(conversation, {
+                "type": "select_slot",
+                "slot_ids": [str(s.slot_id) for s in result.slots],
+            })
+        else:
+            await self._save_pending_action(conversation, None)
+
+        return EngineResponse(
+            text=result.message,
+            intent=Intent.AGENDAR,
+            confidence=1.0,
+            guardrail_action="allow",
+        )
+
     def _extract_number(self, text: str) -> int | None:
         """Extract a number from user text (handles '1', 'opção 1', 'primeiro', etc.)."""
         # Direct number
@@ -443,20 +524,49 @@ class AIOrchestrator:
         entities = faro.entities
 
         if faro.intent == Intent.AGENDAR:
-            if entities.get("doctor_name") or entities.get("date"):
+            specialty = entities.get("specialty")
+            doctor_name = entities.get("doctor_name")
+            date_str = entities.get("date")
+            time_str = entities.get("time")
+
+            has_target = specialty or doctor_name
+
+            if has_target and date_str:
+                # Has both target (specialty/doctor) and date → search slots immediately
                 result = await self.schedule_actions.search_slots(
-                    specialty=None,
-                    doctor_name=entities.get("doctor_name"),
-                    date_str=entities.get("date"),
-                    time_str=entities.get("time"),
+                    specialty=specialty,
+                    doctor_name=doctor_name,
+                    date_str=date_str,
+                    time_str=time_str,
                 )
-                # If slots found, save them as pending action for selection
                 if result.success and result.slots:
                     await self._save_pending_action(conversation, {
                         "type": "select_slot",
                         "slot_ids": [str(s.slot_id) for s in result.slots],
                     })
                 return result.message
+
+            if has_target and not date_str:
+                # Has specialty/doctor but no date → ask for date and save context
+                target_label = specialty or doctor_name
+                await self._save_pending_action(conversation, {
+                    "type": "awaiting_schedule_date",
+                    "specialty": specialty,
+                    "doctor_name": doctor_name,
+                })
+                logger.info("[ACTION] Aguardando data para agendar com %s", target_label)
+                return (
+                    f"Ótimo! Para agendar em {target_label}, qual data e horário você prefere? "
+                    "Pode dizer 'amanhã', 'segunda às 10h', ou uma data específica."
+                )
+
+            if date_str and not has_target:
+                # Has date but no specialty/doctor → ask for specialty
+                return (
+                    "Para qual especialidade ou médico você gostaria de agendar? "
+                    "Por favor, informe a especialidade (ex: Ortopedia, Cardiologia)."
+                )
+
             return None
 
         if faro.intent == Intent.CANCELAR:

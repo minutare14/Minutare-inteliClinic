@@ -52,6 +52,60 @@ class FaroBrief:
         }
 
 
+# ─── Known medical specialties (for entity extraction + intent boost) ──────────
+
+KNOWN_SPECIALTIES: list[tuple[str, str]] = [
+    # (normalized keyword, display name)
+    ("ortopedia", "Ortopedia"),
+    ("ortopedista", "Ortopedia"),
+    ("cardiologia", "Cardiologia"),
+    ("cardiologista", "Cardiologia"),
+    ("pediatria", "Pediatria"),
+    ("pediatra", "Pediatria"),
+    ("ginecologia", "Ginecologia"),
+    ("ginecologista", "Ginecologia"),
+    ("obstetricia", "Obstetrícia"),
+    ("obstetra", "Obstetrícia"),
+    ("neurologia", "Neurologia"),
+    ("neurologista", "Neurologia"),
+    ("dermatologia", "Dermatologia"),
+    ("dermatologista", "Dermatologia"),
+    ("oftalmologia", "Oftalmologia"),
+    ("oftalmologista", "Oftalmologia"),
+    ("psiquiatria", "Psiquiatria"),
+    ("psiquiatra", "Psiquiatria"),
+    ("urologia", "Urologia"),
+    ("urologista", "Urologia"),
+    ("endocrinologia", "Endocrinologia"),
+    ("endocrinologista", "Endocrinologia"),
+    ("gastroenterologia", "Gastroenterologia"),
+    ("gastro", "Gastroenterologia"),
+    ("pneumologia", "Pneumologia"),
+    ("pneumologista", "Pneumologia"),
+    ("reumatologia", "Reumatologia"),
+    ("reumatologista", "Reumatologia"),
+    ("oncologia", "Oncologia"),
+    ("oncologista", "Oncologia"),
+    ("otorrino", "Otorrinolaringologia"),
+    ("otorrinolaringologia", "Otorrinolaringologia"),
+    ("clinica geral", "Clínica Geral"),
+    ("clinico geral", "Clínica Geral"),
+    ("clinica medica", "Clínica Médica"),
+    ("medicina geral", "Clínica Geral"),
+    ("nutrologia", "Nutrologia"),
+    ("nutricionista", "Nutrição"),
+    ("nutricao", "Nutrição"),
+    ("fisioterapia", "Fisioterapia"),
+    ("fisioterapeuta", "Fisioterapia"),
+    ("psicologia", "Psicologia"),
+    ("psicologo", "Psicologia"),
+    ("psicologa", "Psicologia"),
+    ("vascular", "Cirurgia Vascular"),
+    ("cirurgia", "Cirurgia Geral"),
+    ("cirurgiao", "Cirurgia Geral"),
+]
+
+
 # ─── Confirmation patterns (PT-BR) ─────────────────────────────
 
 CONFIRMATION_PATTERNS = [
@@ -219,6 +273,14 @@ def _parse_dates(text_norm: str) -> dict:
     return result
 
 
+def _extract_specialty(text_norm: str) -> str | None:
+    """Extract medical specialty from text using known specialty list."""
+    for keyword, display in KNOWN_SPECIALTIES:
+        if keyword in text_norm:
+            return display
+    return None
+
+
 def _extract_entities(text_norm: str) -> dict:
     """
     Simple entity extraction (regex-based).
@@ -248,6 +310,11 @@ def _extract_entities(text_norm: str) -> dict:
     )
     if doc_match:
         entities["doctor_name"] = doc_match.group(1).title()
+
+    # Medical specialty
+    specialty = _extract_specialty(text_norm)
+    if specialty:
+        entities["specialty"] = specialty
 
     # Date/time
     dates = _parse_dates(text_norm)
@@ -322,6 +389,15 @@ def analyze(text: str) -> FaroBrief:
         confidence = min(confidence + 0.15, 0.99)
     if intent == Intent.REMARCAR and entities.get("date"):
         confidence = min(confidence + 0.10, 0.99)
+
+    # 4b. Specialty detected → treat as scheduling intent if not already clear
+    if entities.get("specialty"):
+        if intent == Intent.DESCONHECIDA:
+            # Message mentions a specialty but no scheduling verb — still treat as AGENDAR
+            intent = Intent.AGENDAR
+            confidence = 0.80
+        elif intent == Intent.AGENDAR:
+            confidence = min(confidence + 0.10, 0.99)
 
     # 5. Missing fields
     missing = _compute_missing_fields(intent, entities)

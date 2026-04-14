@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     # --- Domínio público da API (usado para derivar URL do webhook) ---
     api_domain: str = ""  # ex: "api.inteliclinic.minutarecore.space"
 
+    # --- Identidade da Clínica ---
+    clinic_id: str = "minutare"
+    clinic_name: str = "Minutare Med"
+    clinic_short_name: str = ""
+    clinic_chatbot_name: str = "Assistente"
+    clinic_phone: str = ""
+    clinic_city: str = ""
+
     @property
     def telegram_webhook_computed_url(self) -> str:
         """URL do webhook: valor explícito tem prioridade; senão, deriva de api_domain."""
