@@ -30,9 +30,9 @@ class Settings(BaseSettings):
 
     # --- Identidade da Clínica ---
     clinic_id: str = "minutare"
-    clinic_name: str = "Minutare Med"
+    clinic_name: str = ""  # configurar via admin ou .env CLINIC_NAME
     clinic_short_name: str = ""
-    clinic_chatbot_name: str = "Assistente"
+    clinic_chatbot_name: str = ""  # configurar via admin ou .env CLINIC_CHATBOT_NAME
     clinic_phone: str = ""
     clinic_city: str = ""
 

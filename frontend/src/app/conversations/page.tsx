@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useConversations } from "@/hooks/use-conversations";
 import { ConversationList } from "@/components/conversations/conversation-list";
 import { SectionHeader } from "@/components/ui/section-header";
 import { LoadingState } from "@/components/ui/loading-state";
 import { EmptyState } from "@/components/ui/empty-state";
+import { updateConversationStatus } from "@/lib/api";
 
 const STATUS_FILTERS = [
   { value: "", label: "Todas" },
@@ -17,7 +18,16 @@ const STATUS_FILTERS = [
 
 export default function ConversationsPage() {
   const [statusFilter, setStatusFilter] = useState("");
-  const { data, loading, error } = useConversations(statusFilter || undefined);
+  const { data, loading, error, refetch } = useConversations(statusFilter || undefined);
+
+  const handleClose = useCallback(async (id: string) => {
+    try {
+      await updateConversationStatus(id, "closed");
+      refetch();
+    } catch {
+      // noop
+    }
+  }, [refetch]);
 
   return (
     <div>
@@ -46,7 +56,9 @@ export default function ConversationsPage() {
       {loading && <LoadingState />}
       {error && <p className="text-red-500 text-sm">{error}</p>}
       {data && data.length === 0 && <EmptyState message="Nenhuma conversa encontrada" />}
-      {data && data.length > 0 && <ConversationList conversations={data} />}
+      {data && data.length > 0 && (
+        <ConversationList conversations={data} onClose={handleClose} />
+      )}
     </div>
   );
 }

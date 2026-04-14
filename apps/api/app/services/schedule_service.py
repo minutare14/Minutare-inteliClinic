@@ -38,12 +38,14 @@ class ScheduleService:
     async def list_slots(
         self,
         professional_id: uuid.UUID | None = None,
+        patient_id: uuid.UUID | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         status: str | None = None,
     ) -> list[ScheduleSlot]:
         return await self.repo.list_slots(
             professional_id=professional_id,
+            patient_id=patient_id,
             date_from=date_from,
             date_to=date_to,
             status=status,

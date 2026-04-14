@@ -26,6 +26,7 @@ async def create_slot(
 @router.get("", response_model=list[ScheduleSlotRead])
 async def list_slots(
     professional_id: uuid.UUID | None = Query(None),
+    patient_id: uuid.UUID | None = Query(None),
     date_from: datetime | None = Query(None),
     date_to: datetime | None = Query(None),
     status: str | None = Query(None),
@@ -34,6 +35,7 @@ async def list_slots(
     svc = ScheduleService(session)
     slots = await svc.list_slots(
         professional_id=professional_id,
+        patient_id=patient_id,
         date_from=date_from,
         date_to=date_to,
         status=status,

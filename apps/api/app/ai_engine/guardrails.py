@@ -117,9 +117,17 @@ def detect_prompt_injection(text: str) -> bool:
     return any(re.search(p, text_lower) for p in PROMPT_INJECTION_PATTERNS)
 
 
-def needs_handoff(confidence: float) -> bool:
-    """Check if confidence is below the safe threshold."""
-    return confidence < settings.rag_confidence_threshold
+_DEFAULT_HANDOFF_THRESHOLD = 0.55  # fallback quando DB não tem config
+
+
+def needs_handoff(confidence: float, threshold: float | None = None) -> bool:
+    """Check if confidence is below the handoff threshold.
+
+    Uses the explicit threshold when provided (loaded from clinic_settings).
+    Falls back to 0.55 default (not rag_confidence_threshold — those are different concepts).
+    """
+    effective_threshold = threshold if threshold is not None else _DEFAULT_HANDOFF_THRESHOLD
+    return confidence < effective_threshold
 
 
 # ─── Main guardrail evaluation ─────────────────────────────────
@@ -130,19 +138,22 @@ def evaluate(
     ai_response: str,
     confidence: float,
     consented_ai: bool = True,
+    handoff_enabled: bool = True,
+    handoff_confidence_threshold: float | None = None,
+    clinical_questions_block: bool = True,
 ) -> GuardrailResult:
     """
     Evaluate AI response through all guardrail layers.
 
     Order of checks (highest priority first):
     1. Prompt injection → block
-    2. No AI consent → force handoff
+    2. No AI consent → force handoff (if handoff_enabled)
     3. Urgency → prepend warning + allow
-    4. Clinical question → add disclaimer
-    5. Low confidence → force handoff
+    4. Clinical question → add disclaimer (if clinical_questions_block)
+    5. Low confidence → force handoff (if handoff_enabled)
     6. Otherwise → allow
     """
-    # 1. Prompt injection
+    # 1. Prompt injection (always enforced regardless of settings)
     if detect_prompt_injection(user_text):
         logger.warning("Prompt injection detected: %s", user_text[:80])
         return GuardrailResult(
@@ -153,16 +164,22 @@ def evaluate(
 
     # 2. AI consent check
     if not consented_ai:
+        if handoff_enabled:
+            return GuardrailResult(
+                action=GuardrailAction.FORCE_HANDOFF,
+                modified_response=(
+                    "Para garantir o melhor atendimento, estou encaminhando "
+                    "você para nossa equipe. Um momento, por favor."
+                ),
+                reason="no_ai_consent",
+            )
         return GuardrailResult(
-            action=GuardrailAction.FORCE_HANDOFF,
-            modified_response=(
-                "Para garantir o melhor atendimento, estou encaminhando "
-                "você para nossa equipe. Um momento, por favor."
-            ),
+            action=GuardrailAction.ADD_DISCLAIMER,
+            modified_response="Para usar o assistente, precisamos do seu consentimento. Por favor, confirme que aceita o atendimento via IA.",
             reason="no_ai_consent",
         )
 
-    # 3. Urgency detection
+    # 3. Urgency detection (always enforced — patient safety)
     urgency = detect_urgency(user_text)
     if urgency:
         return GuardrailResult(
@@ -172,9 +189,9 @@ def evaluate(
             urgency_detected=True,
         )
 
-    # 4. Clinical question
+    # 4. Clinical question — respects clinical_questions_block config
     clinical = detect_clinical_question(user_text)
-    if clinical:
+    if clinical and clinical_questions_block:
         return GuardrailResult(
             action=GuardrailAction.ADD_DISCLAIMER,
             modified_response=f"{DISCLAIMER_PT}\n\n{ai_response}",
@@ -182,8 +199,8 @@ def evaluate(
             clinical_detected=True,
         )
 
-    # 5. Low confidence
-    if needs_handoff(confidence):
+    # 5. Low confidence — respects handoff_enabled and configurable threshold
+    if handoff_enabled and needs_handoff(confidence, handoff_confidence_threshold):
         return GuardrailResult(
             action=GuardrailAction.FORCE_HANDOFF,
             modified_response=HANDOFF_LOW_CONFIDENCE,

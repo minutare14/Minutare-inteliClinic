@@ -13,17 +13,17 @@ export default function ConversationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { data: conversation, loading: loadConv } = useConversation(id);
+  const { data: conversation, loading: loadConv, refetch } = useConversation(id);
   const { data: messages, loading: loadMsg } = useMessages(id);
 
   if (loadConv || loadMsg) return <LoadingState />;
-  if (!conversation) return <p className="text-red-500">Conversa nao encontrada</p>;
+  if (!conversation) return <p className="text-red-500">Conversa não encontrada.</p>;
 
   return (
     <div>
       <SectionHeader
         title="Conversa"
-        description={`ID: ${id.slice(0, 8)}...`}
+        description={`ID: ${id.slice(0, 8)}... · Canal: ${conversation.channel}`}
         action={
           <Link
             href="/conversations"
@@ -36,6 +36,7 @@ export default function ConversationDetailPage({
       <ConversationDetail
         conversation={conversation}
         messages={messages || []}
+        onStatusChange={refetch}
       />
     </div>
   );

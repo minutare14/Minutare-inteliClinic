@@ -32,14 +32,21 @@ class ConversationService:
         return await self.repo.get_by_id(conversation_id)
 
     async def list_conversations(
-        self, status: str | None = None, limit: int = 100, offset: int = 0
+        self,
+        status: str | None = None,
+        patient_id: uuid.UUID | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[Conversation]:
-        return await self.repo.list_all(status=status, limit=limit, offset=offset)
+        return await self.repo.list_all(status=status, patient_id=patient_id, limit=limit, offset=offset)
 
     async def list_handoffs(
         self, status: str | None = None, limit: int = 100, offset: int = 0
     ) -> list["Handoff"]:
         return await self.repo.list_handoffs(status=status, limit=limit, offset=offset)
+
+    async def update_status(self, conversation_id: uuid.UUID, status: str) -> Conversation | None:
+        return await self.repo.update_status(conversation_id, status)
 
     async def update_handoff_status(self, handoff_id: uuid.UUID, status: str) -> "Handoff | None":
         return await self.repo.update_handoff_status(handoff_id, status)

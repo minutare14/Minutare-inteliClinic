@@ -21,6 +21,10 @@ class ConversationRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ConversationStatusUpdate(BaseModel):
+    status: str
+
+
 class MessageRead(BaseModel):
     id: uuid.UUID
     conversation_id: uuid.UUID

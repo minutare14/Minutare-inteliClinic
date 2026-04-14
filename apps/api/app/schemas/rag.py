@@ -44,3 +44,15 @@ class RagQueryResult(BaseModel):
     score: float
     document_title: str  # kept for internal use (orchestrator)
     category: str
+
+
+class RagChunkRead(BaseModel):
+    id: uuid.UUID
+    document_id: uuid.UUID
+    chunk_index: int
+    content: str
+    page: int | None
+    created_at: datetime
+    has_embedding: bool = False
+
+    model_config = {"from_attributes": True}

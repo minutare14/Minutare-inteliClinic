@@ -24,9 +24,12 @@ from app.ai_engine.guardrails import (
     detect_urgency,
 )
 from app.ai_engine.intent_router import FaroBrief, Intent
-from app.ai_engine.response_builder import generate_response
+from app.ai_engine.response_composer import ResponseComposer
+from app.core.config import settings
 from app.models.conversation import Conversation
 from app.models.patient import Patient
+from app.repositories.admin_repository import AdminRepository
+from app.services.audit_service import AuditService
 from app.services.conversation_service import ConversationService
 from app.services.rag_service import RagService
 
@@ -66,6 +69,9 @@ class AIOrchestrator:
         self.conv_svc = ConversationService(session)
         self.rag_svc = RagService(session)
         self.schedule_actions = ScheduleActions(session)
+        self.admin_repo = AdminRepository(session)
+        self.audit_svc = AuditService(session)
+        self.composer = ResponseComposer(self.rag_svc)
 
     async def process_message(
         self,
@@ -73,7 +79,64 @@ class AIOrchestrator:
         conversation: Conversation,
         user_text: str,
     ) -> EngineResponse:
-        # ── Step 0: Check pending multi-turn action ────────────
+        # ── Step 0a: Load clinic settings from DB (with .env fallback) ────
+        clinic_name: str | None = None
+        chatbot_name: str | None = None
+        custom_system_prompt: str | None = None
+        rag_top_k_override: int | None = None
+        insurance_context: str | None = None
+        insurance_items: list = []
+        specialties_override: list[str] | None = None
+
+        handoff_enabled: bool = True
+        handoff_confidence_threshold: float | None = None
+        clinical_questions_block: bool = True
+
+        try:
+            clinic_cfg = await self.admin_repo.get_clinic_settings(settings.clinic_id)
+            if clinic_cfg:
+                clinic_name = clinic_cfg.name or None
+                chatbot_name = clinic_cfg.chatbot_name or None
+                rag_top_k_override = clinic_cfg.rag_top_k or None
+                handoff_enabled = clinic_cfg.handoff_enabled
+                handoff_confidence_threshold = clinic_cfg.handoff_confidence_threshold
+                clinical_questions_block = clinic_cfg.clinical_questions_block
+                logger.info(
+                    "[ADMIN] ClinicSettings do banco: clinic='%s' bot='%s' handoff=%s",
+                    clinic_name or "(vazio)", chatbot_name or "(vazio)", handoff_enabled,
+                )
+            else:
+                logger.info(
+                    "[ADMIN] ClinicSettings não encontrado no banco (clinic_id='%s') — usando .env",
+                    settings.clinic_id,
+                )
+
+            # Load insurance catalog for LLM context
+            insurance_items = await self.admin_repo.list_insurance(settings.clinic_id, active_only=True)
+            if insurance_items:
+                insurance_context = "Convênios aceitos: " + ", ".join(i.name for i in insurance_items)
+                logger.info("[ADMIN] Insurance catalog: %d convênios ativos", len(insurance_items))
+
+            # Load clinic specialties (DB override for FARO entity extraction)
+            db_specialties = await self.admin_repo.list_specialties(settings.clinic_id, active_only=True)
+            if db_specialties:
+                specialties_override = [s.name for s in db_specialties]
+                logger.info("[ADMIN] Specialties do banco: %d especialidades", len(db_specialties))
+
+            # Load active prompt for response_builder agent
+            active_prompt = await self.admin_repo.get_active_prompt(settings.clinic_id, "response_builder")
+            if active_prompt:
+                custom_system_prompt = active_prompt.content
+                logger.info(
+                    "[PROMPT] PromptRegistry ativo: '%s' v%d (agent=%s)",
+                    active_prompt.name, active_prompt.version, active_prompt.agent,
+                )
+            else:
+                logger.info("[PROMPT] Sem prompt ativo no PromptRegistry para agent='response_builder' — usando padrão")
+        except Exception:
+            logger.exception("[ADMIN] Falha ao carregar ClinicSettings/Prompts — usando defaults do .env")
+
+        # ── Step 0b: Check pending multi-turn action ────────────
         pending = self._load_pending_action(conversation)
         if pending:
             result = await self._handle_pending_action(
@@ -84,7 +147,7 @@ class AIOrchestrator:
             # If pending handler returned None, fall through to normal flow
 
         # ── Step 1: FARO analysis ──────────────────────────────
-        faro = intent_router.analyze(user_text)
+        faro = intent_router.analyze(user_text, specialties_override=specialties_override)
         logger.info(
             "FARO: intent=%s confidence=%.2f entities=%s",
             faro.intent.value, faro.confidence, faro.entities,
@@ -107,6 +170,9 @@ class AIOrchestrator:
             ai_response="",
             confidence=faro.confidence,
             consented_ai=patient.consented_ai,
+            handoff_enabled=handoff_enabled,
+            handoff_confidence_threshold=handoff_confidence_threshold,
+            clinical_questions_block=clinical_questions_block,
         )
         logger.info(
             "[GUARDRAIL-PRE] action=%s reason=%s consented_ai=%s confidence=%.2f",
@@ -149,6 +215,9 @@ class AIOrchestrator:
                 ai_response=action_response,
                 confidence=1.0,  # action responses bypass confidence check
                 consented_ai=patient.consented_ai,
+                handoff_enabled=handoff_enabled,
+                handoff_confidence_threshold=handoff_confidence_threshold,
+                clinical_questions_block=clinical_questions_block,
             )
             return EngineResponse(
                 text=post_guard.modified_response,
@@ -159,20 +228,24 @@ class AIOrchestrator:
                 faro_brief=faro.to_dict(),
             )
 
-        # ── Step 5: RAG query (operational questions) ──────────
-        rag_results = None
-        if faro.intent in (Intent.DUVIDA_OPERACIONAL, Intent.POLITICAS):
-            rag_results = await self._query_rag(user_text)
-
-        # ── Step 6: Generate response ──────────────────────────
-        logger.info("[LLM] Chamando generate_response — intent=%s rag=%s", faro.intent.value, bool(rag_results))
-        raw_response = await generate_response(
-            context=context,
-            user_text=user_text,
-            faro=faro,
-            rag_results=rag_results,
+        # ── Steps 5-6: RAG + Response via ResponseComposer ─────
+        logger.info(
+            "[COMPOSER] Compondo resposta — intent=%s custom_prompt=%s insurance=%s",
+            faro.intent.value, bool(custom_system_prompt), bool(insurance_context),
         )
-        logger.info("[LLM] Resposta gerada: %r", raw_response[:120])
+        composed = await self.composer.compose(
+            context=context,
+            faro=faro,
+            user_text=user_text,
+            clinic_name=clinic_name,
+            chatbot_name=chatbot_name,
+            custom_system_prompt=custom_system_prompt,
+            insurance_context=insurance_context,
+            rag_top_k=rag_top_k_override,
+        )
+        raw_response = composed.text
+        rag_results = composed.rag_result_count > 0  # bool for audit payload
+        logger.info("[COMPOSER] mode=%s rag=%s text=%r", composed.mode, composed.rag_used, raw_response[:120])
 
         # ── Step 7: Post-response guardrails ───────────────────
         effective_confidence = (
@@ -188,6 +261,9 @@ class AIOrchestrator:
             ai_response=raw_response,
             confidence=effective_confidence,
             consented_ai=patient.consented_ai,
+            handoff_enabled=handoff_enabled,
+            handoff_confidence_threshold=handoff_confidence_threshold,
+            clinical_questions_block=clinical_questions_block,
         )
 
         final_text = post_guard.modified_response
@@ -221,6 +297,28 @@ class AIOrchestrator:
                 conversation.id, user_text, faro, reason="patient_request", priority=priority
             )
             handoff_created = True
+
+        # ── Step 8: Structured pipeline audit log ─────────────
+        await self.audit_svc.log_event(
+            actor_type="ai",
+            actor_id="orchestrator",
+            action="pipeline.completed",
+            resource_type="conversation",
+            resource_id=str(conversation.id),
+            payload={
+                "intent": faro.intent.value,
+                "confidence": round(faro.confidence, 3),
+                "guardrail": post_guard.action.value,
+                "handoff_created": handoff_created,
+                "rag_used": rag_results,
+                "custom_prompt": bool(custom_system_prompt),
+                "prompt_source": "db_registry" if custom_system_prompt else "env_default",
+                "clinic_name_source": "db" if clinic_name else "env",
+                "insurance_catalog_size": len(insurance_items),
+                "specialties_source": "db" if specialties_override else "hardcoded",
+                "response_mode": composed.mode,
+            },
+        )
 
         return EngineResponse(
             text=final_text,
@@ -632,31 +730,6 @@ class AIOrchestrator:
                 lines.append("\nQual especialidade deseja?")
                 return "\n".join(lines)
             return "No momento não há especialidades cadastradas no sistema."
-
-        return None
-
-    async def _query_rag(self, text: str) -> list[dict] | None:
-        """Query RAG for operational information. Falls back to text search."""
-        try:
-            results = await self.rag_svc.query(text)
-            if results:
-                return [
-                    {
-                        "content": r.content,
-                        "document_title": r.document_title,
-                        "score": r.score,
-                    }
-                    for r in results
-                ]
-        except Exception:
-            logger.debug("Vector RAG query failed, trying text search")
-
-        try:
-            results = await self.rag_svc.text_search(text)
-            if results:
-                return results
-        except Exception:
-            logger.exception("RAG text search also failed for: %s", text[:80])
 
         return None
 

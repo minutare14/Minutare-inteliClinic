@@ -19,6 +19,10 @@ class PatientCreate(BaseModel):
     consented_ai: bool = False
     preferred_channel: str = "telegram"
     operational_notes: str | None = None
+    tags: str | None = None
+    crm_notes: str | None = None
+    stage: str = "lead"
+    source: str | None = None
 
 
 class PatientRead(BaseModel):
@@ -35,6 +39,10 @@ class PatientRead(BaseModel):
     consented_ai: bool
     preferred_channel: str
     operational_notes: str | None
+    tags: str | None
+    crm_notes: str | None
+    stage: str | None
+    source: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -45,7 +53,13 @@ class PatientUpdate(BaseModel):
     full_name: str | None = None
     phone: str | None = None
     email: str | None = None
+    birth_date: date | None = None
+    cpf: str | None = None
     convenio_name: str | None = None
     insurance_card_number: str | None = None
     consented_ai: bool | None = None
     operational_notes: str | None = None
+    tags: str | None = None
+    crm_notes: str | None = None
+    stage: str | None = None
+    source: str | None = None

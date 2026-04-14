@@ -125,14 +125,27 @@ class RagService:
         top_k: int | None = None,
         category: str | None = None,
     ) -> list[RagQueryResult]:
-        embedding = await get_embedding(query_text)
-        if not embedding:
-            logger.warning("Cannot query RAG without embeddings")
-            return []
-
         k = top_k or settings.rag_top_k
-        rows = await self.repo.search_similar(embedding, top_k=k, category=category)
+        embedding = await get_embedding(query_text)
 
+        if embedding:
+            rows = await self.repo.search_similar(embedding, top_k=k, category=category)
+            return [
+                RagQueryResult(
+                    chunk_id=r["chunk_id"],
+                    document_id=r["document_id"],
+                    title=r["document_title"],
+                    content=r["content"],
+                    score=float(r["score"]),
+                    document_title=r["document_title"],
+                    category=r["category"],
+                )
+                for r in rows
+            ]
+
+        # Fallback: text search when no embedding provider configured
+        logger.info("No embedding available — using text search fallback")
+        rows = await self.repo.text_search(query_text, top_k=k, category=category)
         return [
             RagQueryResult(
                 chunk_id=r["chunk_id"],
@@ -162,3 +175,21 @@ class RagService:
 
     async def list_documents(self, category: str | None = None) -> list[RagDocument]:
         return await self.repo.list_documents(category)
+
+    async def get_document(self, doc_id: uuid.UUID) -> RagDocument | None:
+        return await self.repo.get_document(doc_id)
+
+    async def get_chunks(self, doc_id: uuid.UUID):
+        return await self.repo.get_chunks(doc_id)
+
+    async def delete_document(self, doc_id: uuid.UUID) -> bool:
+        deleted = await self.repo.delete_document(doc_id)
+        if deleted:
+            await self.audit.log_event(
+                actor_type="human",
+                actor_id="operator",
+                action="document.deleted",
+                resource_type="rag_document",
+                resource_id=str(doc_id),
+            )
+        return deleted

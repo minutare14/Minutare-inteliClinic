@@ -12,6 +12,10 @@ export interface Patient {
   consented_ai: boolean;
   preferred_channel: string;
   operational_notes: string | null;
+  tags: string | null;
+  crm_notes: string | null;
+  stage: string | null;
+  source: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -91,6 +95,16 @@ export interface RagDocument {
   created_at: string;
 }
 
+export interface RagChunk {
+  id: string;
+  document_id: string;
+  chunk_index: number;
+  content: string;
+  page: number | null;
+  created_at: string;
+  has_embedding: boolean;
+}
+
 export interface DashboardSummary {
   total_patients: number;
   total_conversations: number;
@@ -150,3 +164,73 @@ export interface ProfessionalUpdate {
 }
 
 export type UserRole = 'receptionist' | 'manager' | 'admin' | 'support';
+
+// ── Admin ────────────────────────────────────────────────────────────────────
+
+export interface ClinicSettings {
+  id: string;
+  clinic_id: string;
+  name: string;
+  short_name: string | null;
+  chatbot_name: string;
+  cnpj: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip_code: string | null;
+  working_hours: string | null;
+  emergency_phone: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  secondary_color: string | null;
+  accent_color: string | null;
+  ai_provider: string | null;
+  ai_model: string | null;
+  embedding_provider: string | null;
+  rag_confidence_threshold: number;
+  rag_top_k: number;
+  rag_chunk_size: number;
+  rag_chunk_overlap: number;
+  handoff_enabled: boolean;
+  handoff_confidence_threshold: number;
+  clinical_questions_block: boolean;
+  bot_persona: string | null;
+  updated_at: string;
+}
+
+export interface InsuranceItem {
+  id: string;
+  clinic_id: string;
+  name: string;
+  code: string | null;
+  plan_types: string | null;
+  notes: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface PromptItem {
+  id: string;
+  clinic_id: string;
+  agent: string;
+  scope: string;
+  name: string;
+  description: string | null;
+  content: string;
+  version: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClinicSpecialty {
+  id: string;
+  clinic_id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  created_at: string;
+}

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.schemas.rag import (
+    RagChunkRead,
     RagDocumentRead,
     RagIngestRequest,
     RagIngestResponse,
@@ -51,3 +54,35 @@ async def list_documents(
     svc = RagService(session)
     docs = await svc.list_documents(category)
     return [RagDocumentRead.model_validate(d) for d in docs]
+
+
+@router.get("/documents/{doc_id}/chunks", response_model=list[RagChunkRead])
+async def get_document_chunks(
+    doc_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> list[RagChunkRead]:
+    svc = RagService(session)
+    chunks = await svc.get_chunks(doc_id)
+    return [
+        RagChunkRead(
+            id=c.id,
+            document_id=c.document_id,
+            chunk_index=c.chunk_index,
+            content=c.content,
+            page=c.page,
+            created_at=c.created_at,
+            has_embedding=c.embedding is not None,
+        )
+        for c in chunks
+    ]
+
+
+@router.delete("/documents/{doc_id}", status_code=204)
+async def delete_document(
+    doc_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    svc = RagService(session)
+    deleted = await svc.delete_document(doc_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Document not found")

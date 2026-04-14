@@ -139,3 +139,31 @@ class RagRepository:
 
     async def get_document(self, doc_id: uuid.UUID) -> RagDocument | None:
         return await self.session.get(RagDocument, doc_id)
+
+    async def get_chunks(self, doc_id: uuid.UUID) -> list[RagChunk]:
+        stmt = (
+            select(RagChunk)
+            .where(RagChunk.document_id == doc_id)
+            .order_by(RagChunk.chunk_index)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def count_chunks(self, doc_id: uuid.UUID) -> int:
+        from sqlalchemy import func
+        stmt = select(func.count()).select_from(RagChunk).where(RagChunk.document_id == doc_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
+
+    async def delete_document(self, doc_id: uuid.UUID) -> bool:
+        """Delete all chunks then the document. Returns True if deleted."""
+        doc = await self.get_document(doc_id)
+        if not doc:
+            return False
+        # Delete chunks first (no cascade in SQLModel by default)
+        chunks = await self.get_chunks(doc_id)
+        for chunk in chunks:
+            await self.session.delete(chunk)
+        await self.session.delete(doc)
+        await self.session.commit()
+        return True

@@ -22,5 +22,10 @@ class Patient(SQLModel, table=True):
     consented_ai: bool = Field(default=False)
     preferred_channel: str = Field(default="telegram", max_length=32)
     operational_notes: str | None = None
+    # CRM fields
+    tags: str | None = Field(default=None, max_length=512)   # CSV: "urgente,vip,convenio_pendente"
+    crm_notes: str | None = Field(default=None)               # Notas internas do operador
+    stage: str | None = Field(default="lead", max_length=32)  # lead | patient | inactive
+    source: str | None = Field(default=None, max_length=64)   # telegram | whatsapp | indicacao | etc
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

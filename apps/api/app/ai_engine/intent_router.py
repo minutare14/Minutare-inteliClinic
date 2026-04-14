@@ -273,15 +273,19 @@ def _parse_dates(text_norm: str) -> dict:
     return result
 
 
-def _extract_specialty(text_norm: str) -> str | None:
-    """Extract medical specialty from text using known specialty list."""
+def _extract_specialty(text_norm: str, specialties_override: list[str] | None = None) -> str | None:
+    """Extract medical specialty from text. DB specialties checked first, then hardcoded list."""
+    if specialties_override:
+        for name in specialties_override:
+            if name.lower() in text_norm:
+                return name
     for keyword, display in KNOWN_SPECIALTIES:
         if keyword in text_norm:
             return display
     return None
 
 
-def _extract_entities(text_norm: str) -> dict:
+def _extract_entities(text_norm: str, specialties_override: list[str] | None = None) -> dict:
     """
     Simple entity extraction (regex-based).
     Future: integrate GLiNER2 for ML-based NER.
@@ -312,7 +316,7 @@ def _extract_entities(text_norm: str) -> dict:
         entities["doctor_name"] = doc_match.group(1).title()
 
     # Medical specialty
-    specialty = _extract_specialty(text_norm)
+    specialty = _extract_specialty(text_norm, specialties_override)
     if specialty:
         entities["specialty"] = specialty
 
@@ -361,10 +365,13 @@ def _suggest_actions(intent: Intent, entities: dict) -> list[dict]:
     return suggestions
 
 
-def analyze(text: str) -> FaroBrief:
+def analyze(text: str, specialties_override: list[str] | None = None) -> FaroBrief:
     """
     Full FARO analysis on a user message.
     Returns a structured FaroBrief.
+
+    specialties_override: specialty names from ClinicSpecialties DB table.
+    When provided, they are matched first before the hardcoded KNOWN_SPECIALTIES list.
     """
     text_norm = _normalize(text)
 
@@ -379,7 +386,7 @@ def analyze(text: str) -> FaroBrief:
         )
 
     # 2. Extract entities
-    entities = _extract_entities(text_norm)
+    entities = _extract_entities(text_norm, specialties_override)
 
     # 3. Classify intent
     intent, confidence = _classify_intent(text_norm)

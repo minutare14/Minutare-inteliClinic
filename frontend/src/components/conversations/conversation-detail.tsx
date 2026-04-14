@@ -1,19 +1,38 @@
 "use client";
 
+import { useState } from "react";
+import Link from "next/link";
 import type { Conversation, Message } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody } from "@/components/ui/card";
 import { MessageBubble } from "./message-bubble";
 import { INTENT_LABELS } from "@/lib/constants";
 import { formatDateTime, formatConfidence } from "@/lib/formatters";
+import { updateConversationStatus } from "@/lib/api";
 
 export function ConversationDetail({
   conversation,
   messages,
+  onStatusChange,
 }: {
   conversation: Conversation;
   messages: Message[];
+  onStatusChange?: () => void;
 }) {
+  const [updating, setUpdating] = useState(false);
+
+  const handleStatusChange = async (newStatus: string) => {
+    setUpdating(true);
+    try {
+      await updateConversationStatus(conversation.id, newStatus);
+      onStatusChange?.();
+    } catch {
+      // noop
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Messages */}
@@ -43,10 +62,10 @@ export function ConversationDetail({
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Status</dt>
-                <dd><Badge variant={conversation.status}>{conversation.status}</Badge></dd>
+                <dd><Badge variant={conversation.status}>{conversation.status.replace("_", " ")}</Badge></dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500">Intencao</dt>
+                <dt className="text-gray-500">Intenção</dt>
                 <dd className="text-gray-700">
                   {conversation.current_intent
                     ? INTENT_LABELS[conversation.current_intent] || conversation.current_intent
@@ -54,11 +73,11 @@ export function ConversationDetail({
                 </dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500">Confianca</dt>
+                <dt className="text-gray-500">Confiança</dt>
                 <dd className="font-mono text-xs">{formatConfidence(conversation.confidence_score)}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500">Atribuido</dt>
+                <dt className="text-gray-500">Atribuído</dt>
                 <dd className="text-gray-700">{conversation.human_assignee || "—"}</dd>
               </div>
               <div className="flex justify-between">
@@ -66,10 +85,32 @@ export function ConversationDetail({
                 <dd className="text-gray-600 text-xs">{formatDateTime(conversation.created_at)}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-500">Ultima msg</dt>
+                <dt className="text-gray-500">Última msg</dt>
                 <dd className="text-gray-600 text-xs">{formatDateTime(conversation.last_message_at)}</dd>
               </div>
             </dl>
+
+            {/* Status actions */}
+            <div className="mt-4 pt-3 border-t border-gray-100 flex flex-wrap gap-2">
+              {conversation.status !== "closed" && (
+                <button
+                  onClick={() => handleStatusChange("closed")}
+                  disabled={updating}
+                  className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+                >
+                  Fechar
+                </button>
+              )}
+              {conversation.status === "closed" && (
+                <button
+                  onClick={() => handleStatusChange("active")}
+                  disabled={updating}
+                  className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 disabled:opacity-50"
+                >
+                  Reabrir
+                </button>
+              )}
+            </div>
           </CardBody>
         </Card>
 
@@ -77,12 +118,12 @@ export function ConversationDetail({
           <Card>
             <CardBody>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Paciente</h3>
-              <a
+              <Link
                 href={`/patients/${conversation.patient_id}`}
                 className="text-blue-600 hover:text-blue-800 text-sm"
               >
-                Ver paciente
-              </a>
+                Ver perfil do paciente →
+              </Link>
             </CardBody>
           </Card>
         )}

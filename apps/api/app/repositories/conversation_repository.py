@@ -14,11 +14,20 @@ class ConversationRepository:
         self.session = session
 
     async def list_all(
-        self, status: str | None = None, limit: int = 100, offset: int = 0
+        self,
+        status: str | None = None,
+        patient_id: uuid.UUID | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[Conversation]:
         stmt = select(Conversation)
+        conditions = []
         if status:
-            stmt = stmt.where(Conversation.status == status)
+            conditions.append(Conversation.status == status)
+        if patient_id:
+            conditions.append(Conversation.patient_id == patient_id)
+        if conditions:
+            stmt = stmt.where(and_(*conditions))
         stmt = stmt.order_by(Conversation.updated_at.desc()).offset(offset).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -84,6 +93,17 @@ class ConversationRepository:
             conv.updated_at = datetime.utcnow()
             self.session.add(conv)
             await self.session.commit()
+
+    async def update_status(self, conversation_id: uuid.UUID, status: str) -> Conversation | None:
+        conv = await self.get_by_id(conversation_id)
+        if not conv:
+            return None
+        conv.status = status
+        conv.updated_at = datetime.utcnow()
+        self.session.add(conv)
+        await self.session.commit()
+        await self.session.refresh(conv)
+        return conv
 
     async def escalate(self, conversation_id: uuid.UUID, assignee: str | None = None) -> None:
         conv = await self.get_by_id(conversation_id)

@@ -48,6 +48,7 @@ class ScheduleRepository:
     async def list_slots(
         self,
         professional_id: uuid.UUID | None = None,
+        patient_id: uuid.UUID | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         status: str | None = None,
@@ -57,6 +58,8 @@ class ScheduleRepository:
         conditions = []
         if professional_id:
             conditions.append(ScheduleSlot.professional_id == professional_id)
+        if patient_id:
+            conditions.append(ScheduleSlot.patient_id == patient_id)
         if date_from:
             conditions.append(ScheduleSlot.start_at >= date_from)
         if date_to:
@@ -65,7 +68,7 @@ class ScheduleRepository:
             conditions.append(ScheduleSlot.status == status)
         if conditions:
             stmt = stmt.where(and_(*conditions))
-        stmt = stmt.order_by(ScheduleSlot.start_at).limit(limit)
+        stmt = stmt.order_by(ScheduleSlot.start_at.desc()).limit(limit)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
