@@ -102,6 +102,8 @@ export interface RagChunk {
   content: string;
   page: number | null;
   created_at: string;
+  embedded: boolean;
+  embedding_error: string | null;
   has_embedding: boolean;
 }
 
@@ -137,6 +139,14 @@ export interface RagIngestRequest {
   source_path?: string;
 }
 
+export interface RagIngestResponse {
+  document_id: string;
+  chunks_created: number;
+  chunks_embedded: number;
+  chunks_failed: number;
+  embedding_provider: string;
+}
+
 export interface RagStats {
   documents: number;
   chunks_total: number;
@@ -146,9 +156,12 @@ export interface RagStats {
 }
 
 export interface ReindexResult {
+  documents_processed?: number;
   processed: number;
   embedded: number;
   failed: number;
+  chunks_without_embedding?: number;
+  coverage_pct?: number;
 }
 
 export interface TelegramWebhookInfo {

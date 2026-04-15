@@ -20,6 +20,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+RAG_CONTEXT_INTENTS = {Intent.DUVIDA_OPERACIONAL, Intent.POLITICAS}
+
 # ─── System prompt layers (gerados dinamicamente com config da clínica) ────────
 
 SAFETY_RULES = """## REGRAS DE SEGURANÇA (CFM 2.454/2026 + LGPD)
@@ -271,7 +273,7 @@ async def _generate_llm_response(
     )
 
     # Inject RAG results if available
-    if rag_results and faro.intent == Intent.DUVIDA_OPERACIONAL:
+    if rag_results and faro.intent in RAG_CONTEXT_INTENTS:
         rag_context = "\n\n## DOCUMENTOS RELEVANTES (RAG)\n"
         for r in rag_results[:3]:
             rag_context += f"### {r.get('document_title', 'Documento')}\n{r.get('content', '')}\n\n"
@@ -323,7 +325,7 @@ def _generate_template_response(
         return _saudacao_template(context.patient_name, clinic_name=clinic_name)
 
     # For operational questions with RAG results
-    if intent == Intent.DUVIDA_OPERACIONAL and rag_results:
+    if intent in RAG_CONTEXT_INTENTS and rag_results:
         best = rag_results[0]
         response = best.get("content", "")
         source = best.get("document_title", "")

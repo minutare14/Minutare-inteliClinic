@@ -28,6 +28,9 @@ class RagIngestRequest(BaseModel):
 class RagIngestResponse(BaseModel):
     document_id: uuid.UUID
     chunks_created: int
+    chunks_embedded: int
+    chunks_failed: int
+    embedding_provider: str
 
 
 class RagQueryRequest(BaseModel):
@@ -53,6 +56,8 @@ class RagChunkRead(BaseModel):
     content: str
     page: int | None
     created_at: datetime
+    embedded: bool = False
+    embedding_error: str | None = None
     has_embedding: bool = False
 
     model_config = {"from_attributes": True}

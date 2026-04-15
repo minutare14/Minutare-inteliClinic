@@ -74,12 +74,13 @@ class ConversationState:
     entities: dict = field(default_factory=dict)
 
     # Route taken
-    route: str = "unknown"                 # "structured_data" | "schedule" | "rag" | "llm" | "template" | "handoff" | "clarification"
+    route: str = "unknown"                 # "structured_data_lookup" | "schedule_flow" | "rag_retrieval" | "fallback" | "handoff_flow"
     source_of_truth: str = "none"          # "professionals" | "insurance_catalog" | "clinic_settings" | "schedule_db" | "rag" | "llm" | "template"
 
     # Component flags
     structured_lookup_used: bool = False
     rag_used: bool = False
+    retrieval_mode: str = "none"           # "vector" | "text" | "none"
     tool_used: str | None = None           # "schedule_actions" | "rag_service" | None
     handoff_triggered: bool = False
     handoff_reason: str | None = None
@@ -311,14 +312,15 @@ class AIOrchestrator:
             logger.exception("[NODE:structured_data_lookup] Falha — continuando para próximo nó")
 
         if lookup_result and lookup_result.answered:
-            state.route = "structured_data"
+            state.route = "structured_data_lookup"
             state.source_of_truth = lookup_result.source
             state.structured_lookup_used = True
             state.tool_used = "structured_lookup"
             state.response_mode = "structured"
 
             logger.info(
-                "[NODE:decision_router] route=structured_data source=%s",
+                "[NODE:decision_router] route=structured_data_lookup source=%s "
+                "structured_lookup_used=true rag_used=false",
                 lookup_result.source,
             )
 
@@ -400,6 +402,7 @@ class AIOrchestrator:
         )
         raw_response = composed.text
         state.rag_used = composed.rag_used
+        state.retrieval_mode = composed.retrieval_mode
         state.tool_used = "rag_service" if composed.rag_used else None
         state.response_mode = composed.mode
 
@@ -407,12 +410,18 @@ class AIOrchestrator:
             state.route = "rag_retrieval"
             state.source_of_truth = "rag"
         else:
-            state.route = "llm" if composed.mode == "llm" else "clarification"
+            state.route = "fallback"
             state.source_of_truth = "llm" if composed.mode == "llm" else "template"
 
         logger.info(
-            "[NODE:decision_router] route=%s mode=%s rag=%s text=%.120r",
-            state.route, composed.mode, composed.rag_used, raw_response,
+            "[NODE:decision_router] route=%s mode=%s retrieval_mode=%s rag_used=%s "
+            "structured_lookup_used=%s text=%.120r",
+            state.route,
+            composed.mode,
+            state.retrieval_mode,
+            composed.rag_used,
+            state.structured_lookup_used,
+            raw_response,
         )
 
         # ══ NODE 9: post_guardrails ═══════════════════════════════════════════
@@ -509,6 +518,8 @@ class AIOrchestrator:
                     # Component flags
                     "structured_lookup_used": state.structured_lookup_used,
                     "rag_used": state.rag_used,
+                    "retrieval_mode": state.retrieval_mode,
+                    "fallback_used": state.route == "fallback",
                     "tool_used": state.tool_used,
                     "handoff_triggered": state.handoff_triggered,
                     "handoff_reason": state.handoff_reason,

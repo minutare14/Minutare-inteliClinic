@@ -217,15 +217,16 @@ async def seed_db(database_url: str) -> None:
     from app.models.patient import Patient
     from app.models.professional import Professional
     from app.models.schedule import ScheduleSlot
-    from app.models.rag import RagDocument, RagChunk
+    from app.models.rag import RagDocument
     from app.models.conversation import Conversation, Message, Handoff  # noqa
     from app.models.audit import AuditEvent  # noqa
-    from app.services.rag_service import chunk_text
+    from app.services.rag_service import RagService
 
     engine = create_async_engine(database_url, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as session:
+        rag_service = RagService(session)
         # 1. Professionals
         print("\n--- Professionals ---")
         prof_ids = []
@@ -285,28 +286,19 @@ async def seed_db(database_url: str) -> None:
                 print(f"  = {doc_data['title']} (already exists)")
                 continue
 
-            doc = RagDocument(
-                id=uuid.uuid4(),
+            result = await rag_service.ingest_document(
                 title=doc_data["title"],
+                content=doc_data["content"],
                 category=doc_data["category"],
-                status="active",
             )
-            session.add(doc)
-            await session.flush()
-
-            chunks = chunk_text(doc_data["content"], chunk_size=500, overlap=100)
-            for idx, chunk_content in enumerate(chunks):
-                chunk = RagChunk(
-                    id=uuid.uuid4(),
-                    document_id=doc.id,
-                    chunk_index=idx,
-                    content=chunk_content,
+            print(
+                "  + {title} -> chunks={chunks} embedded={embedded} failed={failed}".format(
+                    title=doc_data["title"],
+                    chunks=result.chunks_created,
+                    embedded=result.chunks_embedded,
+                    failed=result.chunks_failed,
                 )
-                session.add(chunk)
-
-            print(f"  + {doc_data['title']} -> {len(chunks)} chunks")
-
-        await session.commit()
+            )
 
     await engine.dispose()
     print("\nSeed complete!")

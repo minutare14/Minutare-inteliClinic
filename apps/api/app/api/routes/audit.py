@@ -91,6 +91,10 @@ async def get_pipeline_trace(
                 status="completed",
                 payload={
                     "route": payload.get("route"),
+                    "retrieval_mode": payload.get("retrieval_mode"),
+                    "structured_lookup_used": payload.get("structured_lookup_used"),
+                    "rag_used": payload.get("rag_used"),
+                    "fallback_used": payload.get("fallback_used"),
                     "tool_used": payload.get("tool_used"),
                     "source_of_truth": payload.get("source_of_truth")
                 }

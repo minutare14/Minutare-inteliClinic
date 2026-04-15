@@ -256,7 +256,7 @@ function ReindexBanner({
           <span className="font-semibold">Reprocessando embeddings…</span>
           {stats && stats.chunks_without_embedding > 0 && (
             <span className="ml-2 text-amber-700">
-              {stats.chunks_without_embedding} chunk(s) sem embedding detectados — gerando vetores com fastembed.
+              {stats.chunks_without_embedding} chunk(s) sem embedding detectados — gerando vetores com sentence-transformers.
             </span>
           )}
         </div>

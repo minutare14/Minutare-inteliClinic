@@ -15,6 +15,7 @@ from app.ai_engine.orchestrator import AIOrchestrator, EngineResponse
 from app.ai_engine.intent_router import Intent
 from app.models.patient import Patient
 from app.models.conversation import Conversation
+from app.models.professional import Professional
 from app.models.schedule import ScheduleSlot, SlotStatus
 
 
@@ -123,7 +124,23 @@ class TestOrchestratorFlow:
             sample_patient, sample_conversation, "Qual o horario de funcionamento?"
         )
         assert result.intent == Intent.DUVIDA_OPERACIONAL
+        assert result.route == "rag_retrieval"
+        assert result.rag_used is True
         assert len(result.text) > 10
+        assert "segunda" in result.text.lower() or "funciona" in result.text.lower()
+
+    async def test_politicas_use_rag_instead_of_generic_fallback(
+        self, session: AsyncSession, sample_patient: Patient,
+        sample_conversation: Conversation, sample_rag_data
+    ):
+        orch = AIOrchestrator(session)
+        result = await orch.process_message(
+            sample_patient, sample_conversation, "Qual a politica de cancelamento?"
+        )
+        assert result.intent == Intent.POLITICAS
+        assert result.route == "rag_retrieval"
+        assert result.rag_used is True
+        assert "24 horas" in result.text or "cancelamento" in result.text.lower()
 
     async def test_listar_especialidades(
         self, session: AsyncSession, sample_patient: Patient,
@@ -135,6 +152,48 @@ class TestOrchestratorFlow:
         )
         assert result.intent == Intent.LISTAR_ESPECIALIDADES
         assert "Cardiologia" in result.text
+
+    async def test_new_active_doctor_appears_in_structured_lookup(
+        self, session: AsyncSession, sample_patient: Patient,
+        sample_conversation: Conversation, sample_professional
+    ):
+        new_professional = Professional(
+            id=uuid.uuid4(),
+            full_name="Dra. Julia Lima",
+            specialty="Cardiologia",
+            crm="CRM/SP 998877",
+            active=True,
+        )
+        session.add(new_professional)
+        await session.commit()
+
+        orch = AIOrchestrator(session)
+        result = await orch.process_message(
+            sample_patient, sample_conversation, "Quais medicos atendem cardiologia?"
+        )
+        assert result.route == "structured_data_lookup"
+        assert result.structured_lookup_used is True
+        assert result.rag_used is False
+        assert "Carlos Mendes" in result.text
+        assert "Julia Lima" in result.text
+
+    async def test_deactivated_doctor_disappears_from_structured_lookup(
+        self, session: AsyncSession, sample_patient: Patient,
+        sample_conversation: Conversation, sample_professional
+    ):
+        sample_professional.active = False
+        session.add(sample_professional)
+        await session.commit()
+
+        orch = AIOrchestrator(session)
+        result = await orch.process_message(
+            sample_patient, sample_conversation, "Quais medicos atendem cardiologia?"
+        )
+        assert result.route == "structured_data_lookup"
+        assert result.structured_lookup_used is True
+        assert result.rag_used is False
+        assert "Carlos Mendes" not in result.text
+        assert "profissionais ativos" in result.text.lower()
 
 
 @pytest.mark.asyncio

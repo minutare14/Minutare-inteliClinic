@@ -190,23 +190,17 @@ class StructuredLookup:
         # "Quais convênios vocês aceitam?"
         # "Aceitam Unimed?"
         if _matches_any(text_norm, _INSURANCE_KW):
-            result = self._lookup_insurance(insurance_items or [])
-            if result.answered:
-                return result
+            return self._lookup_insurance(insurance_items or [])
 
         # ── Priority 4: Clinic address ────────────────────────────────────────
         # "Qual o endereço de vocês?"
-        if _matches_any(text_norm, _ADDRESS_KW) and clinic_cfg:
-            result = self._lookup_address(clinic_cfg)
-            if result.answered:
-                return result
+        if _matches_any(text_norm, _ADDRESS_KW):
+            return self._lookup_address(clinic_cfg)
 
         # ── Priority 5: Clinic phone / contact ───────────────────────────────
         # "Qual o telefone de vocês?"
-        if _matches_any(text_norm, _PHONE_KW) and clinic_cfg:
-            result = self._lookup_phone(clinic_cfg)
-            if result.answered:
-                return result
+        if _matches_any(text_norm, _PHONE_KW):
+            return self._lookup_phone(clinic_cfg)
 
         return LookupResult(answered=False, text="", source="none")
 
@@ -306,7 +300,15 @@ class StructuredLookup:
     def _lookup_insurance(self, insurance_items: list) -> LookupResult:
         """Return insurance catalog from admin table."""
         if not insurance_items:
-            return LookupResult(answered=False, text="", source="insurance_catalog")
+            logger.info("[STRUCTURED] insurance lookup: 0 convenios cadastrados")
+            return LookupResult(
+                answered=True,
+                text=(
+                    "No momento nao encontrei convenios ativos cadastrados no banco da clinica. "
+                    "Posso encaminhar sua duvida para a equipe, se quiser."
+                ),
+                source="insurance_catalog",
+            )
 
         names = [i.name for i in insurance_items]
         text = (
@@ -319,6 +321,14 @@ class StructuredLookup:
 
     def _lookup_address(self, clinic_cfg) -> LookupResult:
         """Return clinic address from ClinicSettings."""
+        if not clinic_cfg:
+            logger.info("[STRUCTURED] address lookup: clinic settings ausente")
+            return LookupResult(
+                answered=True,
+                text="Ainda nao tenho o endereco cadastrado no banco da clinica.",
+                source="clinic_settings",
+            )
+
         parts = []
         if getattr(clinic_cfg, "address", None):
             parts.append(clinic_cfg.address)
@@ -330,7 +340,11 @@ class StructuredLookup:
             parts.append(f"CEP {clinic_cfg.zip_code}")
 
         if not parts:
-            return LookupResult(answered=False, text="", source="clinic_settings")
+            return LookupResult(
+                answered=True,
+                text="Ainda nao tenho o endereco cadastrado no banco da clinica.",
+                source="clinic_settings",
+            )
 
         clinic_name = getattr(clinic_cfg, "name", None) or "nossa clínica"
         text = f"Endereço de *{clinic_name}*:\n\n📍 {', '.join(parts)}"
@@ -343,9 +357,21 @@ class StructuredLookup:
 
     def _lookup_phone(self, clinic_cfg) -> LookupResult:
         """Return clinic phone from ClinicSettings."""
+        if not clinic_cfg:
+            logger.info("[STRUCTURED] phone lookup: clinic settings ausente")
+            return LookupResult(
+                answered=True,
+                text="Ainda nao tenho telefone ou contato cadastrado no banco da clinica.",
+                source="clinic_settings",
+            )
+
         phone = getattr(clinic_cfg, "phone", None)
         if not phone:
-            return LookupResult(answered=False, text="", source="clinic_settings")
+            return LookupResult(
+                answered=True,
+                text="Ainda nao tenho telefone ou contato cadastrado no banco da clinica.",
+                source="clinic_settings",
+            )
 
         clinic_name = getattr(clinic_cfg, "name", None) or "nossa clínica"
         text = f"Telefone / contato de *{clinic_name}*:\n\n📞 {phone}"

@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
 """
-Ingest documents from GUIAS-DEV into the RAG system.
+Ingest markdown documents into the runtime RAG pipeline.
 
 Modes:
-  --mode api    → Send sections to RAG ingest endpoint
-  --mode db     → Write directly to database
-
-Usage:
-    python scripts/ingest_docs.py --mode db
-    python scripts/ingest_docs.py --mode api --api-url http://localhost:8000
-    python scripts/ingest_docs.py --mode db --docs-dir GUIAS-DEV
+  --mode api -> send sections to the HTTP ingest endpoint
+  --mode db  -> write directly through RagService using the configured DB
 """
 from __future__ import annotations
 
@@ -17,25 +12,23 @@ import argparse
 import asyncio
 import re
 import sys
-import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "apps" / "api"))
 
 DEFAULT_DOCS_DIR = "GUIAS-DEV"
 
-# Category mapping based on content patterns
 CATEGORY_PATTERNS = [
-    ("faq", [r"FAQ", r"perguntas?\s+frequentes", r"dúvidas?"]),
-    ("agendamento", [r"agend\w+", r"horário", r"agenda", r"slot"]),
-    ("convenio", [r"convênio", r"convenio", r"operadora", r"plano\s+de\s+saúde", r"TISS", r"TUSS"]),
-    ("atendimento", [r"atendimento", r"recepção", r"recepcao", r"acolhimento"]),
+    ("faq", [r"FAQ", r"perguntas?\s+frequentes", r"duvidas?"]),
+    ("agendamento", [r"agend\w+", r"horario", r"agenda", r"slot"]),
+    ("convenio", [r"convenio", r"operadora", r"plano\s+de\s+saude", r"TISS", r"TUSS"]),
+    ("atendimento", [r"atendimento", r"recepcao", r"acolhimento"]),
     ("financeiro", [r"financeiro", r"faturamento", r"glosa", r"receita"]),
-    ("governanca", [r"governança", r"auditoria", r"LGPD", r"CFM", r"compliance"]),
-    ("especialidades", [r"especialidade", r"médico", r"medico", r"CRM"]),
+    ("governanca", [r"governanca", r"auditoria", r"LGPD", r"CFM", r"compliance"]),
+    ("especialidades", [r"especialidade", r"medico", r"CRM"]),
     ("fluxo_operacional", [r"fluxo", r"operacion\w+", r"processo"]),
     ("rag", [r"RAG", r"base\s+de\s+conhecimento", r"corpus"]),
-    ("ia", [r"inteligência\s+artificial", r"\bIA\b", r"LLM", r"chatbot"]),
+    ("ia", [r"inteligencia\s+artificial", r"\bIA\b", r"LLM", r"chatbot"]),
 ]
 
 
@@ -61,38 +54,38 @@ def extract_sections(filepath: Path) -> list[dict]:
         body = lines[1].strip() if len(lines) > 1 else ""
         if len(body) < 50:
             continue
-        category = classify_section(title, body)
-        sections.append({
-            "title": f"{filepath.stem} — {title}",
-            "content": body,
-            "category": category,
-            "source_path": str(filepath),
-        })
+        sections.append(
+            {
+                "title": f"{filepath.stem} - {title}",
+                "content": body,
+                "category": classify_section(title, body),
+                "source_path": str(filepath),
+            }
+        )
 
     if not sections and len(text) > 100:
-        sections.append({
-            "title": filepath.stem,
-            "content": text,
-            "category": classify_section(filepath.stem, text),
-            "source_path": str(filepath),
-        })
+        sections.append(
+            {
+                "title": filepath.stem,
+                "content": text,
+                "category": classify_section(filepath.stem, text),
+                "source_path": str(filepath),
+            }
+        )
 
     return sections
 
-
-# ── DB mode ───────────────────────────────────────────────────
 
 async def ingest_db(docs_dir: Path, database_url: str) -> None:
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
 
-    from app.models.rag import RagDocument, RagChunk
-    from app.models.patient import Patient  # noqa — metadata
-    from app.models.professional import Professional  # noqa
-    from app.models.schedule import ScheduleSlot  # noqa
-    from app.models.conversation import Conversation, Message, Handoff  # noqa
-    from app.models.audit import AuditEvent  # noqa
-    from app.services.rag_service import chunk_text
+    from app.models.audit import AuditEvent  # noqa: F401
+    from app.models.conversation import Conversation, Handoff, Message  # noqa: F401
+    from app.models.patient import Patient  # noqa: F401
+    from app.models.professional import Professional  # noqa: F401
+    from app.models.schedule import ScheduleSlot  # noqa: F401
+    from app.services.rag_service import RagService
 
     engine = create_async_engine(database_url, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -103,45 +96,35 @@ async def ingest_db(docs_dir: Path, database_url: str) -> None:
         return
 
     print(f"Found {len(md_files)} document(s) in {docs_dir}")
-    total = 0
+    total_sections = 0
 
     async with async_session() as session:
+        rag_service = RagService(session)
         for filepath in md_files:
             print(f"\nProcessing: {filepath.name}")
             sections = extract_sections(filepath)
             print(f"  Extracted {len(sections)} section(s)")
 
             for section in sections:
-                doc = RagDocument(
-                    id=uuid.uuid4(),
+                result = await rag_service.ingest_document(
                     title=section["title"],
+                    content=section["content"],
                     category=section["category"],
                     source_path=section.get("source_path"),
-                    status="active",
                 )
-                session.add(doc)
-                await session.flush()
-
-                chunks = chunk_text(section["content"], chunk_size=500, overlap=100)
-                for idx, chunk_content in enumerate(chunks):
-                    chunk = RagChunk(
-                        id=uuid.uuid4(),
-                        document_id=doc.id,
-                        chunk_index=idx,
-                        content=chunk_content,
+                total_sections += 1
+                print(
+                    "  + '{title}' -> chunks={chunks} embedded={embedded} failed={failed}".format(
+                        title=section["title"],
+                        chunks=result.chunks_created,
+                        embedded=result.chunks_embedded,
+                        failed=result.chunks_failed,
                     )
-                    session.add(chunk)
-
-                total += 1
-                print(f"  + '{section['title']}' -> {len(chunks)} chunks ({section['category']})")
-
-        await session.commit()
+                )
 
     await engine.dispose()
-    print(f"\nDone. Ingested {total} sections from {len(md_files)} files.")
+    print(f"\nDone. Ingested {total_sections} section(s) from {len(md_files)} file(s).")
 
-
-# ── API mode ──────────────────────────────────────────────────
 
 def ingest_api(docs_dir: Path, api_url: str) -> None:
     import httpx
@@ -166,19 +149,28 @@ def ingest_api(docs_dir: Path, api_url: str) -> None:
             total_sections += 1
             try:
                 resp = httpx.post(
-                    f"{api_url}/api/v1/rag/ingest", json=section, timeout=60.0
+                    f"{api_url}/api/v1/rag/ingest",
+                    json=section,
+                    timeout=60.0,
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                print(f"  + '{section['title']}' -> {data['chunks_created']} chunks")
+                print(
+                    "  + '{title}' -> chunks={chunks} embedded={embedded} failed={failed}".format(
+                        title=section["title"],
+                        chunks=data.get("chunks_created", "?"),
+                        embedded=data.get("chunks_embedded", "?"),
+                        failed=data.get("chunks_failed", "?"),
+                    )
+                )
                 total_ingested += 1
-            except Exception as e:
-                print(f"  x '{section['title']}': {e}")
+            except Exception as exc:
+                print(f"  x '{section['title']}': {exc}")
 
-    print(f"\nDone. Ingested {total_ingested}/{total_sections} sections from {len(md_files)} files.")
+    print(
+        f"\nDone. Ingested {total_ingested}/{total_sections} section(s) from {len(md_files)} file(s)."
+    )
 
-
-# ── Main ──────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Ingest documents into RAG")

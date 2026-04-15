@@ -28,7 +28,7 @@ dependencies = [
     # --- Embeddings locais (ONNX, sem PyTorch, gratuito) ---
     # Usado quando EMBEDDING_PROVIDER=local ou auto sem API keys configuradas
     # Modelo padrão: paraphrase-multilingual-MiniLM-L12-v2 (384 dims, PT-BR)
-    "fastembed>=0.4.0",
+    "sentence-transformers>=3.4.0",
 
     # --- AI Engine — LangGraph ---
     # Graph orchestration: https://github.com/langchain-ai/langgraph

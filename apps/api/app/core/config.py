@@ -22,23 +22,23 @@ class Settings(BaseSettings):
 
     # --- Telegram ---
     telegram_bot_token: str = ""
-    telegram_webhook_url: str = ""  # explícita; se vazia, derivada de api_domain
+    telegram_webhook_url: str = ""  # explicit wins; otherwise derived from api_domain
     telegram_webhook_secret: str = ""
 
-    # --- Domínio público da API (usado para derivar URL do webhook) ---
+    # --- Public API domain (used to derive webhook URL) ---
     api_domain: str = ""  # ex: "api.inteliclinic.minutarecore.space"
 
-    # --- Identidade da Clínica ---
+    # --- Clinic identity ---
     clinic_id: str = "minutare"
-    clinic_name: str = ""  # configurar via admin ou .env CLINIC_NAME
+    clinic_name: str = ""  # configure via admin or .env CLINIC_NAME
     clinic_short_name: str = ""
-    clinic_chatbot_name: str = ""  # configurar via admin ou .env CLINIC_CHATBOT_NAME
+    clinic_chatbot_name: str = ""  # configure via admin or .env CLINIC_CHATBOT_NAME
     clinic_phone: str = ""
     clinic_city: str = ""
 
     @property
     def telegram_webhook_computed_url(self) -> str:
-        """URL do webhook: valor explícito tem prioridade; senão, deriva de api_domain."""
+        """Webhook URL: explicit value wins; otherwise derive from api_domain."""
         if self.telegram_webhook_url:
             return self.telegram_webhook_url
         if self.api_domain:
@@ -49,24 +49,24 @@ class Settings(BaseSettings):
     def telegram_token_configured(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_bot_token not in ("", "[PREENCHER]"))
 
-    # --- AI / LLM (geração de resposta) ---
-    llm_provider: str = ""  # groq | openai | anthropic | gemini (empty = auto-detect from keys)
+    # --- AI / LLM ---
+    llm_provider: str = ""  # groq | openai | anthropic | gemini (empty = auto-detect)
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
     groq_api_key: str = ""
     llm_model: str = ""  # override model name (empty = provider default)
 
-    # --- Embeddings (SEPARADO do LLM provider) ---
-    # Groq NÃO suporta embeddings. Configure EMBEDDING_PROVIDER separado do LLM_PROVIDER.
-    # Opções: openai | gemini | local | auto
-    #   openai → text-embedding-3-small (1536 dims, requires OPENAI_API_KEY)
-    #   gemini → text-embedding-004 (768 dims, requires GEMINI_API_KEY)
-    #   local  → fastembed ONNX multilingual (384 dims, gratuito, sem API key)
-    #   auto   → detecta automaticamente: openai → gemini → local
-    embedding_provider: str = "auto"
-    embedding_model: str = ""          # sobrescreve o modelo padrão do provider
-    embedding_dim: int = 384           # 1536=openai, 768=gemini, 384=local/fastembed
+    # --- Embeddings (independent from LLM provider) ---
+    # Groq does not support embeddings. Keep this config separated from LLM_PROVIDER.
+    # Options: openai | gemini | local | auto
+    #   openai -> text-embedding-3-small (1536 dims)
+    #   gemini -> text-embedding-004 (768 dims)
+    #   local  -> sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (384 dims)
+    #   auto   -> openai -> gemini -> local
+    embedding_provider: str = "local"
+    embedding_model: str = ""
+    embedding_dim: int = 384
 
     # --- Qdrant ---
     qdrant_url: str = "http://localhost:6333"

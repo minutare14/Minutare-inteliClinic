@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 import uuid
 
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.rag import RagChunk, RagDocument
@@ -13,7 +14,10 @@ class RagRepository:
         self.session = session
 
     async def create_document(
-        self, title: str, category: str, source_path: str | None = None
+        self,
+        title: str,
+        category: str,
+        source_path: str | None = None,
     ) -> RagDocument:
         doc = RagDocument(title=title, category=category, source_path=source_path)
         self.session.add(doc)
@@ -27,6 +31,9 @@ class RagRepository:
         chunk_index: int,
         content: str,
         embedding: list[float] | None = None,
+        *,
+        embedded: bool = False,
+        embedding_error: str | None = None,
         page: int | None = None,
         metadata_json: str | None = None,
     ) -> RagChunk:
@@ -35,6 +42,8 @@ class RagRepository:
             chunk_index=chunk_index,
             content=content,
             embedding=embedding,
+            embedded=embedded,
+            embedding_error=embedding_error,
             page=page,
             metadata_json=metadata_json,
         )
@@ -51,27 +60,33 @@ class RagRepository:
     ) -> list[dict]:
         """Vector similarity search using pgvector cosine distance."""
         category_filter = ""
-        params: dict = {"embedding": str(query_embedding), "top_k": top_k}
+        params: dict[str, object] = {
+            "embedding": "[" + ",".join(f"{value:.8f}" for value in query_embedding) + "]",
+            "top_k": top_k,
+        }
         if category:
             category_filter = "AND d.category = :category"
             params["category"] = category
 
-        sql = text(f"""
+        sql = text(
+            f"""
             SELECT
                 c.id AS chunk_id,
                 d.id AS document_id,
                 c.content,
                 d.title AS document_title,
                 d.category,
-                1 - (c.embedding <=> :embedding::vector) AS score
+                1 - (c.embedding <=> CAST(:embedding AS vector)) AS score
             FROM rag_chunks c
             JOIN rag_documents d ON d.id = c.document_id
             WHERE c.embedding IS NOT NULL
+              AND c.embedded = TRUE
               AND d.status = 'active'
               {category_filter}
-            ORDER BY c.embedding <=> :embedding::vector
+            ORDER BY c.embedding <=> CAST(:embedding AS vector)
             LIMIT :top_k
-        """)
+        """
+        )
         result = await self.session.execute(sql, params)
         rows = result.mappings().all()
         return [dict(r) for r in rows]
@@ -82,17 +97,27 @@ class RagRepository:
         top_k: int = 5,
         category: str | None = None,
     ) -> list[dict]:
-        """Keyword-based text search on chunk content (fallback when no embeddings)."""
-        # Extract meaningful words (3+ chars) for ILIKE search
-        words = [w for w in query_text.lower().split() if len(w) >= 3]
+        """Keyword-based text search on chunk content."""
+        words = [w for w in re.findall(r"\w+", query_text.lower()) if len(w) >= 3]
         if not words:
             return []
 
-        # Build OR conditions for each word
+        search_terms: list[str] = []
+        for word in words:
+            if word not in search_terms:
+                search_terms.append(word)
+            if len(word) >= 5:
+                stem = word[:5]
+                if stem not in search_terms:
+                    search_terms.append(stem)
+
         word_conditions = " OR ".join(
-            f"LOWER(c.content) LIKE :word{i}" for i in range(len(words))
+            f"LOWER(c.content) LIKE :word{i}" for i in range(len(search_terms))
         )
-        params: dict = {f"word{i}": f"%{w}%" for i, w in enumerate(words)}
+        params: dict[str, object] = {
+            f"word{i}": f"%{term}%"
+            for i, term in enumerate(search_terms)
+        }
         params["top_k"] = top_k
 
         category_filter = ""
@@ -100,7 +125,8 @@ class RagRepository:
             category_filter = "AND d.category = :category"
             params["category"] = category
 
-        sql = text(f"""
+        sql = text(
+            f"""
             SELECT
                 c.id AS chunk_id,
                 d.id AS document_id,
@@ -114,7 +140,8 @@ class RagRepository:
               AND ({word_conditions})
               {category_filter}
             LIMIT :top_k
-        """)
+        """
+        )
         result = await self.session.execute(sql, params)
         rows = result.mappings().all()
         return [
@@ -128,6 +155,22 @@ class RagRepository:
             }
             for r in rows
         ]
+
+    async def has_embeddings(self, category: str | None = None) -> bool:
+        stmt = (
+            select(func.count())
+            .select_from(RagChunk)
+            .join(RagDocument, RagDocument.id == RagChunk.document_id)
+            .where(
+                RagDocument.status == "active",
+                RagChunk.embedding.is_not(None),
+                RagChunk.embedded.is_(True),
+            )
+        )
+        if category:
+            stmt = stmt.where(RagDocument.category == category)
+        result = await self.session.execute(stmt)
+        return result.scalar_one() > 0
 
     async def list_documents(self, category: str | None = None) -> list[RagDocument]:
         stmt = select(RagDocument)
@@ -149,8 +192,27 @@ class RagRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_chunks_for_reindex(
+        self,
+        doc_id: uuid.UUID | None = None,
+        *,
+        force: bool = False,
+    ) -> list[RagChunk]:
+        stmt = select(RagChunk)
+        if doc_id:
+            stmt = stmt.where(RagChunk.document_id == doc_id)
+        if not force:
+            stmt = stmt.where(
+                or_(
+                    RagChunk.embedding.is_(None),
+                    RagChunk.embedded.is_(False),
+                )
+            )
+        stmt = stmt.order_by(RagChunk.document_id, RagChunk.chunk_index)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def count_chunks(self, doc_id: uuid.UUID) -> int:
-        from sqlalchemy import func
         stmt = select(func.count()).select_from(RagChunk).where(RagChunk.document_id == doc_id)
         result = await self.session.execute(stmt)
         return result.scalar_one()
@@ -160,7 +222,7 @@ class RagRepository:
         doc = await self.get_document(doc_id)
         if not doc:
             return False
-        # Delete chunks first (no cascade in SQLModel by default)
+
         chunks = await self.get_chunks(doc_id)
         for chunk in chunks:
             await self.session.delete(chunk)
@@ -169,41 +231,48 @@ class RagRepository:
         return True
 
     async def get_chunks_without_embedding(
-        self, doc_id: uuid.UUID | None = None
+        self,
+        doc_id: uuid.UUID | None = None,
     ) -> list[RagChunk]:
-        """Return all chunks with embedding=NULL, optionally filtered by document."""
-        stmt = (
-            select(RagChunk)
-            .where(RagChunk.embedding.is_(None))
-            .order_by(RagChunk.document_id, RagChunk.chunk_index)
-        )
-        if doc_id:
-            stmt = stmt.where(RagChunk.document_id == doc_id)
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        return await self.get_chunks_for_reindex(doc_id, force=False)
 
-    async def update_chunk_embedding(
-        self, chunk_id: uuid.UUID, embedding: list[float]
+    async def update_chunk_indexing(
+        self,
+        chunk_id: uuid.UUID,
+        *,
+        embedding: list[float] | None,
+        embedded: bool,
+        embedding_error: str | None,
     ) -> None:
-        """Update the embedding of a specific chunk (used during backfill)."""
         chunk = await self.session.get(RagChunk, chunk_id)
-        if chunk:
-            chunk.embedding = embedding
-            self.session.add(chunk)
-            await self.session.commit()
+        if not chunk:
+            return
+        chunk.embedding = embedding
+        chunk.embedded = embedded
+        chunk.embedding_error = embedding_error
+        self.session.add(chunk)
+        await self.session.commit()
+
+    async def update_chunk_embedding(self, chunk_id: uuid.UUID, embedding: list[float]) -> None:
+        await self.update_chunk_indexing(
+            chunk_id,
+            embedding=embedding,
+            embedded=True,
+            embedding_error=None,
+        )
 
     async def get_embedding_stats(self) -> dict:
         """
         Returns summary stats for the embedding index.
         Used by admin panel to show chunk coverage.
         """
-        from sqlalchemy import func
         total_docs_stmt = select(func.count()).select_from(RagDocument).where(
             RagDocument.status == "active"
         )
         total_chunks_stmt = select(func.count()).select_from(RagChunk)
         embedded_stmt = select(func.count()).select_from(RagChunk).where(
-            RagChunk.embedding.is_not(None)
+            RagChunk.embedding.is_not(None),
+            RagChunk.embedded.is_(True),
         )
 
         total_docs = (await self.session.execute(total_docs_stmt)).scalar_one()

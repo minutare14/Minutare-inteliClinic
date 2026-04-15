@@ -71,7 +71,9 @@ async def get_document_chunks(
             content=c.content,
             page=c.page,
             created_at=c.created_at,
-            has_embedding=c.embedding is not None,
+            embedded=c.embedded,
+            embedding_error=c.embedding_error,
+            has_embedding=c.embedding is not None and c.embedded,
         )
         for c in chunks
     ]
@@ -109,6 +111,7 @@ async def get_rag_stats(
 @router.post("/reindex")
 async def reindex_documents(
     doc_id: uuid.UUID | None = None,
+    force: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """
@@ -129,5 +132,5 @@ async def reindex_documents(
       failed: chunks that failed (provider error or unavailable)
     """
     svc = RagService(session)
-    result = await svc.reindex_document(doc_id)
+    result = await svc.reindex_document(doc_id, force=force)
     return result

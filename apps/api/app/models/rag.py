@@ -4,7 +4,7 @@ import os
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, Text
+from sqlalchemy import Boolean, Column, JSON, Text
 from sqlmodel import Field, SQLModel
 
 try:
@@ -12,11 +12,11 @@ try:
 except ImportError:
     Vector = None  # allow import without pgvector installed
 
-# Lido do ambiente para sincronizar com a migration de Alembic.
-# Valores por provider:
-#   local/fastembed → 384 (padrão, gratuito)
-#   gemini          → 768
-#   openai          → 1536
+# Read from env to stay aligned with the Alembic vector dimension.
+# Provider dimensions:
+#   local/sentence-transformers -> 384 (default)
+#   gemini                      -> 768
+#   openai                      -> 1536
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "384"))
 
 
@@ -41,8 +41,13 @@ class RagChunk(SQLModel, table=True):
     content: str = Field(sa_column=Column(Text, nullable=False))
     embedding: list[float] | None = Field(
         default=None,
-        sa_column=Column(Vector(EMBEDDING_DIM)) if Vector else Column(Text),
+        sa_column=Column(Vector(EMBEDDING_DIM)) if Vector else Column(JSON),
     )
+    embedded: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, default=False),
+    )
+    embedding_error: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     page: int | None = None
     metadata_json: str | None = None  # JSON string for extra metadata
     created_at: datetime = Field(default_factory=datetime.utcnow)
