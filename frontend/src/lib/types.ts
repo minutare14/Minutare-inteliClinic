@@ -248,3 +248,17 @@ export interface ClinicSpecialty {
   active: boolean;
   created_at: string;
 }
+
+// ── Pipeline ─────────────────────────────────────────────────────────────────
+
+export interface PipelineStep {
+  name: string;
+  status: 'active' | 'completed' | 'skipped' | 'failed';
+  payload: Record<string, any> | null;
+}
+
+export interface PipelineTrace {
+  conversation_id: string;
+  steps: PipelineStep[];
+  created_at: string;
+}

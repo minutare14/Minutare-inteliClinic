@@ -23,6 +23,8 @@ import type {
   InsuranceItem,
   PromptItem,
   ClinicSpecialty,
+  PipelineTrace,
+  PipelineStep,
 } from "./types";
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -272,3 +274,9 @@ export const deleteSpecialty = (id: string) =>
 // Admin — Audit/Logs (reuse existing audit endpoint)
 export const getAdminLogs = (limit = 50) =>
   fetchApi<AuditEvent[]>(`${API_PREFIX}/audit?limit=${limit}&offset=0`);
+
+export const getAuditResourceEvents = (resourceType: string, resourceId: string) =>
+  fetchApi<AuditEvent[]>(`${API_PREFIX}/audit/resource/${resourceType}/${resourceId}`);
+
+export const getPipelineTrace = (conversationId: string) =>
+  fetchApi<PipelineTrace[]>(`${API_PREFIX}/audit/pipeline/${conversationId}`);

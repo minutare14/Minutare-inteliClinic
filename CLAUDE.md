@@ -7,6 +7,22 @@
 
 ## Historico de Alteracoes
 
+### 2026-04-15 — Integridade Operacional & Visualização de Pipeline (Stage 8 & 9)
+
+**Integridade Operacional & Reconciliação (Stage 8):**
+- `Evidencia`: `ReconciliationService` implementado para lidar com desativação de profissionais.
+- `Evidencia`: `ScheduleRepository` agora possui `find_future_booked_by_professional` e `cancel_slot`.
+- `Evidencia`: `ConversationRepository` possui `find_active_with_pending_action` para limpar estados órfãos.
+- `Evidencia`: `AIOrchestrator` agora valida integridade em tempo real (check de profissional ativo) e dispara fluxos de contingência.
+- `Evidencia`: `IntentRouter` corrigido para não forçar agendamento em perguntas informativas sobre especialidades.
+- `Evidencia`: Rota `DELETE /professionals/{id}` integrada ao `ReconciliationService` para automação total.
+
+**Visualização de Pipeline / IA Trace (Stage 9):**
+- `Evidencia`: `AuditRepository.list_by_resource` implementado para filtragem de logs por conversa.
+- `Evidencia`: Rota `GET /api/v1/audit/pipeline/{id}` reconstrói o rastro da IA a partir dos eventos `pipeline.completed`.
+- `Evidencia`: Componente `PipelineViewer` (Frontend) criado para exibir fluxo de Intenção -> Faro -> Guardrails -> Ferramentas.
+- `Evidencia`: Integração no `ConversationDetail` com toggle "Ver IA Trace" para depuração administrativa.
+
 ### 2026-04-13 — Correcoes de bugs + infraestrutura de deploy
 
 **Bugs corrigidos (evidencias confirmadas na auditoria anterior):**

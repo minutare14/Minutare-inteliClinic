@@ -44,6 +44,26 @@ class AuditRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_by_resource(
+        self,
+        resource_type: str,
+        resource_id: str,
+        action: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AuditEvent]:
+        stmt = (
+            select(AuditEvent)
+            .where(AuditEvent.resource_type == resource_type)
+            .where(AuditEvent.resource_id == resource_id)
+        )
+        if action:
+            stmt = stmt.where(AuditEvent.action == action)
+        
+        stmt = stmt.order_by(AuditEvent.created_at.desc()).offset(offset).limit(limit)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def count(self) -> int:
         stmt = select(func.count(AuditEvent.id))
         result = await self.session.execute(stmt)
