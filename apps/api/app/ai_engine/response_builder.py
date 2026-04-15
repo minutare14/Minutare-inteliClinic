@@ -197,18 +197,12 @@ async def generate_response(
     chatbot_name: str | None = None,
     custom_system_prompt: str | None = None,
     insurance_context: str | None = None,
-) -> str:
+) -> tuple[str, bool]:
     """
     Generate response using LLM with full context, or template fallback.
 
-    Args:
-        context: Full conversation context
-        user_text: Raw user message
-        faro: FARO analysis brief
-        rag_results: Optional RAG search results for operational questions
-
     Returns:
-        Response text to send to user
+        (response_text, used_llm) — used_llm=True if LLM was invoked, False if template
     """
     # Check if LLM is available (any configured provider)
     llm_available = bool(
@@ -218,22 +212,27 @@ async def generate_response(
 
     if llm_available:
         provider = _detect_active_provider()
-        logger.info("[LLM] Provider ativo: %s — chamando LLM", provider)
+        logger.info("[LLM] Provider ativo: %s — chamando LLM (intent=%s)", provider, faro.intent.value)
         try:
-            return await _generate_llm_response(
+            text = await _generate_llm_response(
                 context, user_text, faro, rag_results,
                 clinic_name=clinic_name,
                 chatbot_name=chatbot_name,
                 custom_system_prompt=custom_system_prompt,
                 insurance_context=insurance_context,
             )
+            return text, True
         except Exception:
             logger.exception("[LLM] Falha na geração — fallback para template (provider=%s)", provider)
     else:
-        logger.warning("[LLM] Nenhum provider configurado — usando template (intent=%s)", faro.intent.value)
+        logger.warning(
+            "[LLM] Nenhum provider configurado — usando template (intent=%s)",
+            faro.intent.value,
+        )
 
     # Template-based fallback
-    return _generate_template_response(context, user_text, faro, rag_results, clinic_name=clinic_name)
+    text = _generate_template_response(context, user_text, faro, rag_results, clinic_name=clinic_name)
+    return text, False
 
 
 def _detect_active_provider() -> str:

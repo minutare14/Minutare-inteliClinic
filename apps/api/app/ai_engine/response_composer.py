@@ -74,7 +74,7 @@ class ResponseComposer:
                 logger.info("[COMPOSER] RAG: sem resultados para intent=%s — usando LLM puro", faro.intent.value)
 
         # Generate response (LLM or template fallback)
-        text = await generate_response(
+        text, used_llm = await generate_response(
             context=context,
             user_text=user_text,
             faro=faro,
@@ -85,7 +85,17 @@ class ResponseComposer:
             insurance_context=insurance_context,
         )
 
-        mode = "rag_llm" if rag_results else "llm"
+        if rag_results and used_llm:
+            mode = "rag_llm"
+        elif used_llm:
+            mode = "llm"
+        else:
+            mode = "template"
+
+        logger.info(
+            "[COMPOSER] route_mode=%s rag_used=%s rag_results=%d llm=%s",
+            mode, bool(rag_results), len(rag_results) if rag_results else 0, used_llm,
+        )
         return ComposedResponse(
             text=text,
             mode=mode,
