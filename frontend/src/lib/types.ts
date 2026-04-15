@@ -137,6 +137,20 @@ export interface RagIngestRequest {
   source_path?: string;
 }
 
+export interface RagStats {
+  documents: number;
+  chunks_total: number;
+  chunks_with_embedding: number;
+  chunks_without_embedding: number;
+  coverage_pct: number;
+}
+
+export interface ReindexResult {
+  processed: number;
+  embedded: number;
+  failed: number;
+}
+
 export interface TelegramWebhookInfo {
   url: string;
   has_custom_certificate: boolean;

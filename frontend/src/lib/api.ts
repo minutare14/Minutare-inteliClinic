@@ -9,6 +9,8 @@ import type {
   AuditEvent,
   RagDocument,
   RagChunk,
+  RagStats,
+  ReindexResult,
   DashboardSummary,
   HealthStatus,
   ProfessionalCreate,
@@ -166,6 +168,14 @@ export const queryRag = (query: string, top_k = 5, category?: string) => {
   const body: Record<string, unknown> = { query, top_k };
   if (category) body.category = category;
   return fetchApi<RagQueryResult[]>(`${API_PREFIX}/rag/query`, { method: 'POST', body: JSON.stringify(body) });
+};
+
+export const getRagStats = () =>
+  fetchApi<RagStats>(`${API_PREFIX}/rag/stats`);
+
+export const reindexRag = (docId?: string) => {
+  const params = docId ? `?doc_id=${docId}` : "";
+  return fetchApi<ReindexResult>(`${API_PREFIX}/rag/reindex${params}`, { method: "POST" });
 };
 
 // Telegram

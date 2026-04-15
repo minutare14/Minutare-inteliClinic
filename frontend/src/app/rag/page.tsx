@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useFetch } from "@/hooks/use-fetch";
 import {
   getRagDocuments,
@@ -7,8 +7,10 @@ import {
   deleteRagDocument,
   ingestDocument,
   queryRag,
+  getRagStats,
+  reindexRag,
 } from "@/lib/api";
-import type { RagDocument, RagChunk, RagQueryResult } from "@/lib/types";
+import type { RagDocument, RagChunk, RagQueryResult, RagStats, ReindexResult } from "@/lib/types";
 import { SectionHeader } from "@/components/ui/section-header";
 import { LoadingState } from "@/components/ui/loading-state";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -221,6 +223,87 @@ function QueryPanel() {
   );
 }
 
+/* ── Reindex Banner ── */
+function ReindexBanner({
+  reindexing,
+  result,
+  error,
+  stats,
+}: {
+  reindexing: boolean;
+  result: ReindexResult | null;
+  error: string | null;
+  stats: RagStats | null;
+}) {
+  if (!reindexing && !result && !error) return null;
+
+  if (reindexing) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-3 mb-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm">
+        <svg
+          className="w-4 h-4 shrink-0 animate-spin text-amber-600"
+          fill="none"
+          viewBox="0 0 24 24"
+        >
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+          />
+        </svg>
+        <div>
+          <span className="font-semibold">Reprocessando embeddings…</span>
+          {stats && stats.chunks_without_embedding > 0 && (
+            <span className="ml-2 text-amber-700">
+              {stats.chunks_without_embedding} chunk(s) sem embedding detectados — gerando vetores com fastembed.
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (result) {
+    const allOk = result.failed === 0;
+    return (
+      <div
+        className={`flex items-center gap-3 px-4 py-3 mb-4 rounded-lg border text-sm ${
+          allOk
+            ? "border-green-200 bg-green-50 text-green-800"
+            : "border-yellow-200 bg-yellow-50 text-yellow-800"
+        }`}
+      >
+        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {allOk ? (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          ) : (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M12 3a9 9 0 110 18A9 9 0 0112 3z" />
+          )}
+        </svg>
+        <span>
+          <span className="font-semibold">Reindexação concluída.</span>{" "}
+          {result.embedded} chunk(s) indexados com sucesso
+          {result.failed > 0 && `, ${result.failed} falhou(ram)`}.
+        </span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-3 mb-4 rounded-lg border border-red-200 bg-red-50 text-red-800 text-sm">
+        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+        <span><span className="font-semibold">Erro na reindexação:</span> {error}</span>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 /* ── Main Page ── */
 export default function RagPage() {
   const { data, loading, error, refetch } = useFetch(() => getRagDocuments());
@@ -233,6 +316,42 @@ export default function RagPage() {
   const [chunksDocId, setChunksDocId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+
+  const [stats, setStats] = useState<RagStats | null>(null);
+  const [reindexing, setReindexing] = useState(false);
+  const [reindexResult, setReindexResult] = useState<ReindexResult | null>(null);
+  const [reindexError, setReindexError] = useState<string | null>(null);
+
+  const runReindex = useCallback(async () => {
+    setReindexing(true);
+    setReindexResult(null);
+    setReindexError(null);
+    try {
+      const result = await reindexRag();
+      setReindexResult(result);
+      refetch();
+    } catch (err: unknown) {
+      setReindexError(err instanceof Error ? err.message : "Falha ao reindexar");
+    } finally {
+      setReindexing(false);
+    }
+  }, [refetch]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getRagStats()
+      .then((s) => {
+        if (cancelled) return;
+        setStats(s);
+        if (s.chunks_without_embedding > 0) {
+          runReindex();
+        }
+      })
+      .catch(() => {
+        // stats unavailable — skip auto-reindex silently
+      });
+    return () => { cancelled = true; };
+  }, [runReindex]);
 
   const setField = (field: string) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -278,13 +397,27 @@ export default function RagPage() {
         title="RAG — Base de Conhecimento"
         description="Documentos ingeridos para resposta automática"
         action={
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            + Adicionar Documento
-          </button>
+          <div className="flex items-center gap-3">
+            {stats && !reindexing && (
+              <span className="text-xs text-gray-500">
+                {stats.coverage_pct}% com embedding ({stats.chunks_with_embedding}/{stats.chunks_total} chunks)
+              </span>
+            )}
+            <button
+              onClick={() => setShowCreate(true)}
+              className="px-4 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              + Adicionar Documento
+            </button>
+          </div>
         }
+      />
+
+      <ReindexBanner
+        reindexing={reindexing}
+        result={reindexResult}
+        error={reindexError}
+        stats={stats}
       />
 
       {loading && <LoadingState />}
