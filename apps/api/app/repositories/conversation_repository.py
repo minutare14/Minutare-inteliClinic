@@ -146,6 +146,24 @@ class ConversationRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def find_active_with_pending_action(self) -> list[Conversation]:
+        """
+        Return active/waiting conversations that have a pending multi-turn action.
+        Used by ReconciliationService to detect conversations affected by
+        professional deactivation.
+        """
+        stmt = select(Conversation).where(
+            and_(
+                Conversation.pending_action.is_not(None),
+                Conversation.status.in_([
+                    ConversationStatus.active,
+                    ConversationStatus.waiting_input,
+                ]),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def create_handoff(
         self,
         conversation_id: uuid.UUID,

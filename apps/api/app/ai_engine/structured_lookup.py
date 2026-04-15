@@ -222,8 +222,12 @@ class StructuredLookup:
             logger.exception("[STRUCTURED] Falha ao buscar profissional '%s'", doctor_name)
             return LookupResult(answered=False, text="", source="professionals")
 
+        logger.info(
+            "[STRUCTURED] doctor→search: name='%s' active_only=True professionals_returned=%d",
+            doctor_name, len(profs),
+        )
         if not profs:
-            logger.info("[STRUCTURED] Profissional '%s' não encontrado no banco", doctor_name)
+            logger.info("[STRUCTURED] Profissional '%s' não encontrado no banco (active_only=True)", doctor_name)
             # Return answered=True so we don't fall through to generic template
             return LookupResult(
                 answered=True,
@@ -264,29 +268,39 @@ class StructuredLookup:
         return LookupResult(answered=True, text="\n".join(lines), source="professionals")
 
     async def _lookup_specialty_doctors(self, specialty: str) -> LookupResult:
-        """Find all doctors in a given specialty."""
+        """Find all ACTIVE doctors in a given specialty (active_only=True)."""
         try:
             profs = await self.prof_repo.list_active(specialty)
         except Exception:
             logger.exception("[STRUCTURED] Falha ao buscar profissionais por especialidade '%s'", specialty)
             return LookupResult(answered=False, text="", source="professionals")
 
+        logger.info(
+            "[STRUCTURED] specialty→doctors: '%s' active_only=True professionals_returned=%d",
+            specialty, len(profs),
+        )
+
         if not profs:
-            return LookupResult(answered=False, text="", source="professionals")
+            # Return answered=True so we don't fall through to RAG with potentially stale data.
+            # The source-of-truth is the live DB: this specialty has no active doctors right now.
+            return LookupResult(
+                answered=True,
+                text=(
+                    f"No momento não temos profissionais ativos em *{specialty}*. "
+                    "Posso listar as especialidades disponíveis se preferir."
+                ),
+                source="professionals",
+            )
 
         if len(profs) == 1:
             p = profs[0]
-            text = f"Temos *{p.full_name}* atendendo em {specialty}."
+            text = f"Sim! Temos *{p.full_name}* atendendo em *{specialty}*."
         else:
             lines = [f"Profissionais que atendem *{specialty}*:\n"]
             for p in profs:
                 lines.append(f"• {p.full_name}")
             text = "\n".join(lines)
 
-        logger.info(
-            "[STRUCTURED] specialty→doctors: '%s' → %d profissionais (source=professionals)",
-            specialty, len(profs),
-        )
         return LookupResult(answered=True, text=text, source="professionals")
 
     def _lookup_insurance(self, insurance_items: list) -> LookupResult:

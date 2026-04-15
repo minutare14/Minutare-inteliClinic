@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 
@@ -10,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.repositories.professional_repository import ProfessionalRepository
+from app.services.reconciliation_service import ReconciliationService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/professionals", tags=["professionals"])
 
@@ -102,4 +106,25 @@ async def deactivate_professional(
     prof = await repo.deactivate(professional_id)
     if not prof:
         raise HTTPException(status_code=404, detail="Professional not found.")
+
+    # Run operational reconciliation: cancel future slots, create handoffs
+    try:
+        reconciliation = ReconciliationService(session)
+        result = await reconciliation.reconcile_professional_deactivation(professional_id)
+        logger.info(
+            "[PROFESSIONALS] Reconciliation completed for prof='%s': "
+            "affected_slots=%d cancelled=%d handoffs=%d errors=%d",
+            prof.full_name,
+            result.affected_slots,
+            result.cancelled_slots,
+            result.handoffs_created,
+            len(result.errors),
+        )
+    except Exception:
+        logger.exception(
+            "[PROFESSIONALS] Reconciliation failed for prof='%s' — "
+            "professional was deactivated but slots/conversations may need manual cleanup",
+            prof.full_name,
+        )
+
     return ProfessionalRead.model_validate(prof)

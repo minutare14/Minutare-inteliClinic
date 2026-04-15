@@ -397,13 +397,25 @@ def analyze(text: str, specialties_override: list[str] | None = None) -> FaroBri
     if intent == Intent.REMARCAR and entities.get("date"):
         confidence = min(confidence + 0.10, 0.99)
 
-    # 4b. Specialty detected → treat as scheduling intent if not already clear
+    # 4b. Specialty detected — decide between informational and scheduling intent.
+    #
+    # BUG FIX: previously, any specialty + DESCONHECIDA was forced to AGENDAR.
+    # This caused "tem neurologista?" to search slots instead of listing doctors.
+    #
+    # Rule:
+    #   DESCONHECIDA + specialty → LISTAR_ESPECIALIDADES (informational)
+    #     e.g. "tem neurologista?", "vocês tem cardiologista?", "existe ortopedista?"
+    #   AGENDAR already classified + specialty → boost confidence (unchanged)
+    #
+    # AGENDAR is only correct when scheduling keywords are present (already scored above).
     if entities.get("specialty"):
         if intent == Intent.DESCONHECIDA:
-            # Message mentions a specialty but no scheduling verb — still treat as AGENDAR
-            intent = Intent.AGENDAR
+            # No scheduling verb found — user is asking about specialty existence or doctor listing.
+            intent = Intent.LISTAR_ESPECIALIDADES
             confidence = 0.80
         elif intent == Intent.AGENDAR:
+            confidence = min(confidence + 0.10, 0.99)
+        elif intent == Intent.LISTAR_ESPECIALIDADES:
             confidence = min(confidence + 0.10, 0.99)
 
     # 5. Missing fields

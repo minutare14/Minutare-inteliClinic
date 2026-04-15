@@ -97,3 +97,25 @@ class ScheduleRepository:
         await self.session.commit()
         await self.session.refresh(slot)
         return slot
+
+    async def find_future_booked_by_professional(
+        self, professional_id: uuid.UUID
+    ) -> list[ScheduleSlot]:
+        """
+        Find future booked slots for a professional.
+        Used by ReconciliationService when a professional is deactivated.
+        """
+        now = datetime.utcnow()
+        stmt = (
+            select(ScheduleSlot)
+            .where(
+                and_(
+                    ScheduleSlot.professional_id == professional_id,
+                    ScheduleSlot.status == SlotStatus.booked,
+                    ScheduleSlot.start_at > now,
+                )
+            )
+            .order_by(ScheduleSlot.start_at)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

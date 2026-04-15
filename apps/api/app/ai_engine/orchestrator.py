@@ -84,6 +84,15 @@ class ConversationState:
     handoff_triggered: bool = False
     handoff_reason: str | None = None
 
+    # Operational validity flags (live data checks)
+    active_only_applied: bool = True       # professionals always filtered by active=True
+    professionals_returned: int = 0        # number of professionals returned in lookup
+    medical_availability_check: bool = False  # whether slot/professional validity was checked
+    invalidated_schedule_detected: bool = False  # detected a booked slot with deactivated professional
+    contingency_flow_triggered: bool = False     # contingency response was sent to patient
+    patient_notification_required: bool = False  # patient needs notification (set by reconciliation)
+    alternative_offered: bool = False            # alternative slot/doctor was offered
+
     # Guardrails
     guardrail_pre: str = "allow"
     guardrail_post: str = "allow"
@@ -503,6 +512,14 @@ class AIOrchestrator:
                     "tool_used": state.tool_used,
                     "handoff_triggered": state.handoff_triggered,
                     "handoff_reason": state.handoff_reason,
+                    # Operational validity checks
+                    "active_only_applied": state.active_only_applied,
+                    "professionals_returned": state.professionals_returned,
+                    "medical_availability_check": state.medical_availability_check,
+                    "invalidated_schedule_detected": state.invalidated_schedule_detected,
+                    "contingency_flow_triggered": state.contingency_flow_triggered,
+                    "patient_notification_required": state.patient_notification_required,
+                    "alternative_offered": state.alternative_offered,
                     # Runtime context sources
                     "clinic_name_source": state.clinic_name_source,
                     "prompt_source": state.prompt_source,
@@ -581,6 +598,101 @@ class AIOrchestrator:
             )
 
         selected_id = uuid.UUID(slot_ids[slot_number - 1])
+
+        # ── Operational validity check: verify the professional is still active ──
+        # This guards against the case where a professional was deactivated after
+        # the slot list was shown but before the patient confirmed the choice.
+        slot_record = await self.schedule_actions.schedule_repo.get_by_id(selected_id)
+        if slot_record:
+            prof = await self.structured_lookup.prof_repo.get_by_id(slot_record.professional_id)
+            if not prof or not prof.active:
+                await self._save_pending_action(conversation, None)
+                prof_name = prof.full_name if prof else "o profissional selecionado"
+                specialty = prof.specialty if prof else None
+
+                await self.audit_svc.log_event(
+                    actor_type="system",
+                    actor_id="orchestrator",
+                    action="operational.slot_invalidated_at_booking",
+                    resource_type="schedule_slot",
+                    resource_id=str(selected_id),
+                    payload={
+                        "reason": "professional_deactivated",
+                        "professional_id": str(slot_record.professional_id),
+                        "professional_name": prof_name,
+                        "conversation_id": str(conversation.id),
+                        "medical_availability_check": True,
+                        "invalidated_schedule_detected": True,
+                        "contingency_flow_triggered": True,
+                        "patient_notification_required": True,
+                    },
+                )
+                logger.warning(
+                    "[NODE:operational_state_check] professional_deactivated slot_id=%s prof='%s' conv=%s "
+                    "invalidated_schedule_detected=True contingency_flow_triggered=True",
+                    selected_id, prof_name, conversation.id,
+                )
+
+                contingency_text = (
+                    f"Lamentamos informar que *{prof_name}* não está mais disponível para atendimento. "
+                    "Pedimos desculpas pelo transtorno.\n\n"
+                )
+
+                # Try to offer alternative slot in the same specialty
+                if specialty:
+                    alt = await self.schedule_actions.search_slots(specialty=specialty)
+                    if alt.success and alt.slots:
+                        await self._save_pending_action(conversation, {
+                            "type": "select_slot",
+                            "slot_ids": [str(s.slot_id) for s in alt.slots],
+                        })
+                        contingency_text += (
+                            f"Encontrei outras opções disponíveis em *{specialty}*:\n\n"
+                            + "\n".join(
+                                f"{i}️⃣ {s.display()}" for i, s in enumerate(alt.slots, 1)
+                            )
+                            + "\n\nQual horário prefere? Responda com o número."
+                        )
+                        logger.info(
+                            "[NODE:contingency_flow] alternative_offered=True specialty='%s' options=%d",
+                            specialty, len(alt.slots),
+                        )
+                    else:
+                        contingency_text += (
+                            "No momento não encontrei outros horários disponíveis em "
+                            f"*{specialty}*. Nossa equipe entrará em contato para reagendar."
+                        )
+                        await self._create_handoff(
+                            conversation.id, user_text,
+                            FaroBrief(intent=Intent.AGENDAR, confidence=1.0),
+                            reason="professional_unavailable",
+                            priority="high",
+                        )
+                        logger.warning(
+                            "[NODE:contingency_flow] no_alternative specialty='%s' handoff_created=True",
+                            specialty,
+                        )
+                else:
+                    contingency_text += (
+                        "Nossa equipe entrará em contato para reagendar. "
+                        "Pedimos desculpas pelo inconveniente."
+                    )
+                    await self._create_handoff(
+                        conversation.id, user_text,
+                        FaroBrief(intent=Intent.AGENDAR, confidence=1.0),
+                        reason="professional_unavailable",
+                        priority="high",
+                    )
+
+                return EngineResponse(
+                    text=contingency_text,
+                    intent=Intent.AGENDAR,
+                    confidence=1.0,
+                    guardrail_action="allow",
+                    route="contingency_flow",
+                    source_of_truth="professionals",
+                )
+
         result = await self.schedule_actions.book_slot(selected_id, patient.id, source="telegram")
         await self._save_pending_action(conversation, None)
         return EngineResponse(
