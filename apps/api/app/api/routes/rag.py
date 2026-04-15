@@ -86,3 +86,48 @@ async def delete_document(
     deleted = await svc.delete_document(doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
+
+
+@router.get("/stats")
+async def get_rag_stats(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Returns embedding coverage stats for the admin panel.
+
+    Response:
+      documents: total active documents
+      chunks_total: total chunks
+      chunks_with_embedding: chunks with embedding vector
+      chunks_without_embedding: chunks missing embedding (need reindex)
+      coverage_pct: percentage of chunks with embedding
+    """
+    svc = RagService(session)
+    return await svc.get_stats()
+
+
+@router.post("/reindex")
+async def reindex_documents(
+    doc_id: uuid.UUID | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Regenerate embeddings for chunks without embedding.
+
+    - If doc_id is provided: reindexes only that document's chunks.
+    - If doc_id is None: reindexes ALL documents (global backfill).
+
+    Uses the currently configured EMBEDDING_PROVIDER.
+    Run this after:
+      1. Configuring EMBEDDING_PROVIDER for the first time
+      2. Changing EMBEDDING_PROVIDER
+      3. After ingesting documents when no embedding provider was available
+
+    Response:
+      processed: chunks attempted
+      embedded: chunks successfully embedded
+      failed: chunks that failed (provider error or unavailable)
+    """
+    svc = RagService(session)
+    result = await svc.reindex_document(doc_id)
+    return result

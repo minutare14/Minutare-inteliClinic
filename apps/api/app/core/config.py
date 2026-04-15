@@ -49,14 +49,24 @@ class Settings(BaseSettings):
     def telegram_token_configured(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_bot_token not in ("", "[PREENCHER]"))
 
-    # --- AI / LLM ---
+    # --- AI / LLM (geração de resposta) ---
     llm_provider: str = ""  # groq | openai | anthropic | gemini (empty = auto-detect from keys)
-    embedding_provider: str = "openai"  # openai | anthropic | local
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
     groq_api_key: str = ""
     llm_model: str = ""  # override model name (empty = provider default)
+
+    # --- Embeddings (SEPARADO do LLM provider) ---
+    # Groq NÃO suporta embeddings. Configure EMBEDDING_PROVIDER separado do LLM_PROVIDER.
+    # Opções: openai | gemini | local | auto
+    #   openai → text-embedding-3-small (1536 dims, requires OPENAI_API_KEY)
+    #   gemini → text-embedding-004 (768 dims, requires GEMINI_API_KEY)
+    #   local  → fastembed ONNX multilingual (384 dims, gratuito, sem API key)
+    #   auto   → detecta automaticamente: openai → gemini → local
+    embedding_provider: str = "auto"
+    embedding_model: str = ""          # sobrescreve o modelo padrão do provider
+    embedding_dim: int = 384           # 1536=openai, 768=gemini, 384=local/fastembed
 
     # --- Qdrant ---
     qdrant_url: str = "http://localhost:6333"

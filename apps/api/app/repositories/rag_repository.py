@@ -167,3 +167,53 @@ class RagRepository:
         await self.session.delete(doc)
         await self.session.commit()
         return True
+
+    async def get_chunks_without_embedding(
+        self, doc_id: uuid.UUID | None = None
+    ) -> list[RagChunk]:
+        """Return all chunks with embedding=NULL, optionally filtered by document."""
+        stmt = (
+            select(RagChunk)
+            .where(RagChunk.embedding.is_(None))
+            .order_by(RagChunk.document_id, RagChunk.chunk_index)
+        )
+        if doc_id:
+            stmt = stmt.where(RagChunk.document_id == doc_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def update_chunk_embedding(
+        self, chunk_id: uuid.UUID, embedding: list[float]
+    ) -> None:
+        """Update the embedding of a specific chunk (used during backfill)."""
+        chunk = await self.session.get(RagChunk, chunk_id)
+        if chunk:
+            chunk.embedding = embedding
+            self.session.add(chunk)
+            await self.session.commit()
+
+    async def get_embedding_stats(self) -> dict:
+        """
+        Returns summary stats for the embedding index.
+        Used by admin panel to show chunk coverage.
+        """
+        from sqlalchemy import func
+        total_docs_stmt = select(func.count()).select_from(RagDocument).where(
+            RagDocument.status == "active"
+        )
+        total_chunks_stmt = select(func.count()).select_from(RagChunk)
+        embedded_stmt = select(func.count()).select_from(RagChunk).where(
+            RagChunk.embedding.is_not(None)
+        )
+
+        total_docs = (await self.session.execute(total_docs_stmt)).scalar_one()
+        total_chunks = (await self.session.execute(total_chunks_stmt)).scalar_one()
+        embedded = (await self.session.execute(embedded_stmt)).scalar_one()
+
+        return {
+            "documents": total_docs,
+            "chunks_total": total_chunks,
+            "chunks_with_embedding": embedded,
+            "chunks_without_embedding": total_chunks - embedded,
+            "coverage_pct": round(embedded / total_chunks * 100, 1) if total_chunks > 0 else 0.0,
+        }

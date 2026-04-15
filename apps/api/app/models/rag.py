@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime
 
@@ -10,6 +11,13 @@ try:
     from pgvector.sqlalchemy import Vector
 except ImportError:
     Vector = None  # allow import without pgvector installed
+
+# Lido do ambiente para sincronizar com a migration de Alembic.
+# Valores por provider:
+#   local/fastembed → 384 (padrão, gratuito)
+#   gemini          → 768
+#   openai          → 1536
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "384"))
 
 
 class RagDocument(SQLModel, table=True):
@@ -22,9 +30,6 @@ class RagDocument(SQLModel, table=True):
     version: str = Field(default="1.0", max_length=20)
     status: str = Field(default="active", max_length=20)  # active | archived
     created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-EMBEDDING_DIM = 1536  # OpenAI text-embedding-3-small default
 
 
 class RagChunk(SQLModel, table=True):
