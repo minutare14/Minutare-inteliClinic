@@ -1,4 +1,5 @@
 import { API_URL, API_PREFIX } from "./constants";
+import { getToken, clearAuth } from "./auth";
 import type {
   Patient,
   Conversation,
@@ -27,16 +28,35 @@ import type {
   PipelineStep,
 } from "./types";
 
-async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+async function fetchApi<T>(
+  path: string,
+  options?: RequestInit,
+  /** Pass an explicit token (e.g. during login flow before context is set). */
+  overrideToken?: string,
+): Promise<T> {
   const url = `${API_URL}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-  });
+  const token = overrideToken ?? getToken();
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string>),
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(url, { ...options, headers });
   const text = await res.text();
+
+  if (res.status === 401) {
+    // Token expired or invalid — clear session and redirect to login
+    clearAuth();
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+    throw new Error("Sessão expirada — faça login novamente");
+  }
+
   if (!res.ok) {
     let message = `API ${res.status}: ${res.statusText}`;
     if (text) {
@@ -300,3 +320,47 @@ export const getAuditResourceEvents = (resourceType: string, resourceId: string)
 
 export const getPipelineTrace = (conversationId: string) =>
   fetchApi<PipelineTrace[]>(`${API_PREFIX}/audit/pipeline/${conversationId}`);
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  role: string;
+  full_name: string;
+}
+
+export interface AuthUserResponse {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  active: boolean;
+  created_at: string;
+}
+
+/** Exchange credentials for a JWT. Does NOT inject stored token (public endpoint). */
+export async function loginApi(email: string, password: string): Promise<LoginResponse> {
+  const url = `${API_URL}${API_PREFIX}/auth/login`;
+  const body = new URLSearchParams({ username: email, password });
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let message = "Credenciais inválidas";
+    try {
+      const parsed = JSON.parse(text) as { detail?: string };
+      if (parsed.detail) message = parsed.detail;
+    } catch { /* ignore */ }
+    throw new Error(message);
+  }
+  return JSON.parse(text) as LoginResponse;
+}
+
+/** Fetch the currently authenticated user's profile using the given token. */
+export async function getMeApi(token: string): Promise<AuthUserResponse> {
+  return fetchApi<AuthUserResponse>(`${API_PREFIX}/auth/me`, {}, token);
+}
