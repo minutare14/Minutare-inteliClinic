@@ -31,6 +31,7 @@ class RagIngestResponse(BaseModel):
     chunks_embedded: int
     chunks_failed: int
     embedding_provider: str
+    embedding_model: str
 
 
 class RagQueryRequest(BaseModel):

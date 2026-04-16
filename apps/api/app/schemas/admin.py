@@ -35,6 +35,7 @@ class AISettingsUpdate(BaseModel):
     ai_provider: str | None = None
     ai_model: str | None = None
     embedding_provider: str | None = None
+    embedding_model: str | None = None
     rag_confidence_threshold: float | None = None
     rag_top_k: int | None = None
     rag_chunk_size: int | None = None
@@ -68,6 +69,7 @@ class ClinicSettingsRead(BaseModel):
     ai_provider: str | None
     ai_model: str | None
     embedding_provider: str | None
+    embedding_model: str | None
     rag_confidence_threshold: float
     rag_top_k: int
     rag_chunk_size: int

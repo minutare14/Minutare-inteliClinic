@@ -103,6 +103,10 @@ async def get_rag_stats(
       chunks_with_embedding: chunks with embedding vector
       chunks_without_embedding: chunks missing embedding (need reindex)
       coverage_pct: percentage of chunks with embedding
+      embedding_provider: effective provider used by runtime (clinic_settings -> env)
+      embedding_model: effective model used by runtime
+      embedding_config_source: "clinic_settings" or "env"
+      config_error: explicit incompatibility or missing-key reason, if any
     """
     svc = RagService(session)
     return await svc.get_stats()
@@ -120,7 +124,8 @@ async def reindex_documents(
     - If doc_id is provided: reindexes only that document's chunks.
     - If doc_id is None: reindexes ALL documents (global backfill).
 
-    Uses the currently configured EMBEDDING_PROVIDER.
+    Uses the effective embedding config resolved by runtime:
+      clinic_settings.embedding_provider / embedding_model -> env fallback.
     Run this after:
       1. Configuring EMBEDDING_PROVIDER for the first time
       2. Changing EMBEDDING_PROVIDER
@@ -130,6 +135,9 @@ async def reindex_documents(
       processed: chunks attempted
       embedded: chunks successfully embedded
       failed: chunks that failed (provider error or unavailable)
+      embedding_provider: effective provider used
+      embedding_model: effective model used
+      config_error: explicit incompatibility or missing-key reason, if any
     """
     svc = RagService(session)
     result = await svc.reindex_document(doc_id, force=force)

@@ -21,7 +21,7 @@ from app.schemas.admin import (
     SpecialtyRead,
     SpecialtyUpdate,
 )
-from app.services.admin_service import AdminService
+from app.services.admin_service import AdminConfigError, AdminService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -58,7 +58,10 @@ async def update_ai_settings(
     session: AsyncSession = Depends(get_session),
 ) -> ClinicSettingsRead:
     svc = AdminService(session)
-    return await svc.update_ai_settings(data)
+    try:
+        return await svc.update_ai_settings(data)
+    except AdminConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Insurance Catalog ───────────────────────────────────────────────────────

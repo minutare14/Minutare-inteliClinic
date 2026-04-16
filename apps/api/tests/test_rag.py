@@ -10,11 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from app.models.admin import ClinicSettings
 from app.models.rag import RagChunk, RagDocument
 from app.services.rag_service import RagService, chunk_text
 
 
-async def _fake_embedding(_: str, *, phase: str = "query") -> list[float]:
+async def _fake_embedding(
+    _: str,
+    *,
+    phase: str = "query",
+    embedding_config=None,
+) -> list[float]:
     base = 0.1 if phase == "query" else 0.2
     return [base] * 384
 
@@ -118,6 +124,74 @@ class TestRagIngest:
         assert updated.embedded is True
         assert updated.embedding is not None
         assert updated.embedding_error is None
+
+    async def test_runtime_embedding_config_prefers_clinic_settings(self, session: AsyncSession, monkeypatch):
+        monkeypatch.setattr("app.services.rag_service.settings.embedding_provider", "openai")
+        monkeypatch.setattr("app.services.rag_service.settings.embedding_model", "text-embedding-3-small")
+        monkeypatch.setattr("app.services.rag_service.settings.embedding_dim", 384)
+        monkeypatch.setattr("app.services.rag_service.settings.clinic_id", "minutare")
+
+        clinic_cfg = ClinicSettings(
+            clinic_id="minutare",
+            name="Clinica Teste",
+            embedding_provider="local",
+            embedding_model="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        )
+        session.add(clinic_cfg)
+        await session.commit()
+
+        svc = RagService(session)
+        config = await svc._resolve_embedding_config()
+
+        assert config.source == "clinic_settings"
+        assert config.provider == "local"
+        assert config.model == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+    async def test_runtime_embedding_config_falls_back_to_env_when_clinic_setting_is_invalid(
+        self,
+        session: AsyncSession,
+        monkeypatch,
+    ):
+        monkeypatch.setattr("app.services.rag_service.settings.embedding_provider", "local")
+        monkeypatch.setattr(
+            "app.services.rag_service.settings.embedding_model",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        )
+        monkeypatch.setattr("app.services.rag_service.settings.embedding_dim", 384)
+        monkeypatch.setattr("app.services.rag_service.settings.clinic_id", "minutare")
+        monkeypatch.setattr("app.services.rag_service.settings.openai_api_key", "")
+
+        clinic_cfg = ClinicSettings(
+            clinic_id="minutare",
+            name="Clinica Teste",
+            embedding_provider="openai",
+            embedding_model="text-embedding-3-small",
+        )
+        session.add(clinic_cfg)
+        await session.commit()
+
+        svc = RagService(session)
+        config = await svc._resolve_embedding_config()
+
+        assert config.source == "env_fallback"
+        assert config.provider == "local"
+        assert config.model == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+    async def test_stats_include_runtime_embedding_config(self, session: AsyncSession, monkeypatch):
+        monkeypatch.setattr("app.services.rag_service.settings.embedding_provider", "local")
+        monkeypatch.setattr(
+            "app.services.rag_service.settings.embedding_model",
+            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        )
+        monkeypatch.setattr("app.services.rag_service.settings.embedding_dim", 384)
+
+        svc = RagService(session)
+        stats = await svc.get_stats()
+
+        assert stats["embedding_provider"] == "local"
+        assert stats["embedding_model"] == "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        assert stats["embedding_config_source"] == "env"
+        assert stats["config_error"] is None
 
 
 @pytest.mark.asyncio

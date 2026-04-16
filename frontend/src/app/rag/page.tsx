@@ -285,6 +285,7 @@ function ReindexBanner({
           <span className="font-semibold">Reindexação concluída.</span>{" "}
           {result.embedded} chunk(s) indexados com sucesso
           {result.failed > 0 && `, ${result.failed} falhou(ram)`}.
+          {result.config_error && ` Motivo principal: ${result.config_error}.`}
         </span>
       </div>
     );
@@ -399,9 +400,14 @@ export default function RagPage() {
         action={
           <div className="flex items-center gap-3">
             {stats && !reindexing && (
-              <span className="text-xs text-gray-500">
-                {stats.coverage_pct}% com embedding ({stats.chunks_with_embedding}/{stats.chunks_total} chunks)
-              </span>
+              <div className="text-right">
+                <div className="text-xs text-gray-500">
+                  {stats.coverage_pct}% com embedding ({stats.chunks_with_embedding}/{stats.chunks_total} chunks)
+                </div>
+                <div className="text-xs text-gray-400">
+                  {stats.embedding_provider} · {stats.embedding_model}
+                </div>
+              </div>
             )}
             <button
               onClick={() => setShowCreate(true)}
@@ -419,6 +425,12 @@ export default function RagPage() {
         error={reindexError}
         stats={stats}
       />
+
+      {stats?.config_error && !reindexing && (
+        <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+          ConfiguraÃ§Ã£o atual de embedding com aviso: {stats.config_error}
+        </div>
+      )}
 
       {loading && <LoadingState />}
       {error && <p className="text-red-500 text-sm">{error}</p>}

@@ -36,10 +36,30 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
       ...options?.headers,
     },
   });
+  const text = await res.text();
   if (!res.ok) {
-    throw new Error(`API ${res.status}: ${res.statusText}`);
+    let message = `API ${res.status}: ${res.statusText}`;
+    if (text) {
+      try {
+        const parsed = JSON.parse(text) as { detail?: string | { msg?: string }[] };
+        if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+          message = parsed.detail;
+        } else if (Array.isArray(parsed.detail) && parsed.detail.length > 0) {
+          const first = parsed.detail[0];
+          if (first?.msg) {
+            message = first.msg;
+          }
+        }
+      } catch {
+        message = text;
+      }
+    }
+    throw new Error(message);
   }
-  return res.json();
+  if (!text) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 // Health

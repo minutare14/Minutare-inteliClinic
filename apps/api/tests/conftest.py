@@ -22,6 +22,7 @@ from app.models.schedule import ScheduleSlot, SlotStatus
 from app.models.conversation import Conversation, Message, Handoff
 from app.models.audit import AuditEvent
 from app.models.rag import RagDocument, RagChunk
+from app.models.admin import ClinicSettings
 
 
 @pytest_asyncio.fixture

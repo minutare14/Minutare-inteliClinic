@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.admin import ClinicSettings, InsuranceCatalog, PromptRegistry
+from app.core.embedding import (
+    ADMIN_EMBEDDING_PROVIDERS,
+    default_embedding_dimension,
+    default_embedding_model,
+    normalize_embedding_provider,
+)
+from app.models.admin import ClinicSettings
 from app.repositories.admin_repository import AdminRepository
 from app.schemas.admin import (
     AISettingsUpdate,
@@ -23,9 +30,29 @@ from app.schemas.admin import (
     SpecialtyUpdate,
 )
 
+logger = logging.getLogger(__name__)
+
+
+class AdminConfigError(ValueError):
+    """Raised when the admin panel attempts to persist an invalid AI/RAG config."""
+
+
+def _env_provider() -> str:
+    return normalize_embedding_provider(settings.embedding_provider or "local")
+
+
+def _raw_provider(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _env_model_for(provider: str) -> str:
+    explicit_model = settings.embedding_model if _env_provider() == provider else None
+    return default_embedding_model(provider, explicit_model)
+
 
 def _env_defaults() -> dict:
     """Seed clinic_settings from .env values on first access."""
+    provider = _env_provider()
     return {
         "name": settings.clinic_name,
         "short_name": settings.clinic_short_name or None,
@@ -33,7 +60,8 @@ def _env_defaults() -> dict:
         "city": settings.clinic_city or None,
         "phone": settings.clinic_phone or None,
         "ai_provider": settings.llm_provider or None,
-        "embedding_provider": settings.embedding_provider or "openai",
+        "embedding_provider": provider,
+        "embedding_model": _env_model_for(provider),
         "rag_confidence_threshold": settings.rag_confidence_threshold,
         "rag_top_k": settings.rag_top_k,
         "rag_chunk_size": settings.rag_chunk_size,
@@ -46,23 +74,108 @@ class AdminService:
         self.repo = AdminRepository(session)
         self.clinic_id = settings.clinic_id
 
-    # ── Clinic Settings ─────────────────────────────────────────────────────
-
-    async def get_clinic_settings(self) -> ClinicSettingsRead:
+    async def _get_or_seed_clinic_settings(self) -> ClinicSettings:
         obj = await self.repo.get_or_create_clinic_settings(
             clinic_id=self.clinic_id,
             defaults=_env_defaults(),
         )
+        return await self._ensure_ai_defaults(obj)
+
+    async def _ensure_ai_defaults(self, obj: ClinicSettings) -> ClinicSettings:
+        updates: dict[str, object] = {}
+        provider = normalize_embedding_provider(obj.embedding_provider or _env_provider())
+        provider_is_persisted = bool(obj.embedding_provider)
+
+        if provider_is_persisted:
+            try:
+                self._validate_embedding_provider(provider)
+            except AdminConfigError as exc:
+                fallback_provider = _env_provider()
+                updates["embedding_provider"] = fallback_provider
+                updates["embedding_model"] = _env_model_for(fallback_provider)
+                logger.warning(
+                    "[ADMIN:ai] clinic_id=%s invalid persisted embedding config "
+                    "provider=%s model=%s reason=%s normalized_provider=%s normalized_model=%s",
+                    self.clinic_id,
+                    obj.embedding_provider,
+                    obj.embedding_model,
+                    exc,
+                    fallback_provider,
+                    updates["embedding_model"],
+                )
+                provider = fallback_provider
+
+        if not obj.embedding_provider:
+            updates["embedding_provider"] = provider
+        if not obj.embedding_model and "embedding_model" not in updates:
+            updates["embedding_model"] = self._resolve_embedding_model(
+                provider=provider,
+                current=obj,
+                requested=None,
+            )
+
+        if not updates:
+            return obj
+
+        updated = await self.repo.update_clinic_settings(self.clinic_id, updates)
+        return updated or obj
+
+    def _resolve_embedding_model(
+        self,
+        *,
+        provider: str,
+        current: ClinicSettings | None,
+        requested: str | None,
+    ) -> str:
+        requested_model = (requested or "").strip() or None
+        if requested_model:
+            return requested_model
+
+        current_provider = normalize_embedding_provider(current.embedding_provider) if current else None
+        if current and current.embedding_model and current_provider == provider:
+            return current.embedding_model
+
+        return _env_model_for(provider)
+
+    def _validate_embedding_provider(self, provider: str) -> None:
+        normalized = _raw_provider(provider) or "local"
+        if normalized not in ADMIN_EMBEDDING_PROVIDERS:
+            supported = ", ".join(ADMIN_EMBEDDING_PROVIDERS)
+            raise AdminConfigError(
+                f"Provider de embedding inválido: '{provider}'. Use um destes: {supported}."
+            )
+
+        required_dim = default_embedding_dimension(normalized)
+        if settings.embedding_dim != required_dim:
+            raise AdminConfigError(
+                "O provider de embedding "
+                f"'{normalized}' requer dimensão {required_dim}, mas este deploy está com "
+                f"EMBEDDING_DIM={settings.embedding_dim}. Ajuste o servidor e rode as "
+                "migrations antes de usar esse provider."
+            )
+
+        if normalized == "openai" and not settings.openai_api_key:
+            raise AdminConfigError(
+                "OpenAI para embeddings exige OPENAI_API_KEY configurada no backend."
+            )
+
+        if normalized == "gemini" and not settings.gemini_api_key:
+            raise AdminConfigError(
+                "Gemini para embeddings exige GEMINI_API_KEY configurada no backend."
+            )
+
+    async def get_clinic_settings(self) -> ClinicSettingsRead:
+        obj = await self._get_or_seed_clinic_settings()
         return ClinicSettingsRead.model_validate(obj)
 
     async def update_profile(self, data: ClinicProfileUpdate) -> ClinicSettingsRead:
         payload = {k: v for k, v in data.model_dump().items() if v is not None}
         obj = await self.repo.update_clinic_settings(self.clinic_id, payload)
         if not obj:
-            # Create on first PATCH
             defaults = _env_defaults()
             defaults.update(payload)
             obj = await self.repo.get_or_create_clinic_settings(self.clinic_id, defaults)
+        obj = await self._ensure_ai_defaults(obj)
         return ClinicSettingsRead.model_validate(obj)
 
     async def update_branding(self, data: BrandingUpdate) -> ClinicSettingsRead:
@@ -72,18 +185,39 @@ class AdminService:
             defaults = _env_defaults()
             defaults.update(payload)
             obj = await self.repo.get_or_create_clinic_settings(self.clinic_id, defaults)
+        obj = await self._ensure_ai_defaults(obj)
         return ClinicSettingsRead.model_validate(obj)
 
     async def update_ai_settings(self, data: AISettingsUpdate) -> ClinicSettingsRead:
         payload = {k: v for k, v in data.model_dump().items() if v is not None}
+        current = await self._get_or_seed_clinic_settings()
+
+        provider = _raw_provider(
+            payload.get("embedding_provider") or current.embedding_provider or _env_provider()
+        ) or "local"
+        self._validate_embedding_provider(provider)
+        payload["embedding_provider"] = provider
+        payload["embedding_model"] = self._resolve_embedding_model(
+            provider=provider,
+            current=current,
+            requested=payload.get("embedding_model"),
+        )
+
+        logger.info(
+            "[ADMIN:ai] clinic_id=%s embedding_provider=%s embedding_model=%s schema_dimension=%d",
+            self.clinic_id,
+            payload["embedding_provider"],
+            payload["embedding_model"],
+            settings.embedding_dim,
+        )
+
         obj = await self.repo.update_clinic_settings(self.clinic_id, payload)
         if not obj:
             defaults = _env_defaults()
             defaults.update(payload)
             obj = await self.repo.get_or_create_clinic_settings(self.clinic_id, defaults)
+        obj = await self._ensure_ai_defaults(obj)
         return ClinicSettingsRead.model_validate(obj)
-
-    # ── Insurance Catalog ───────────────────────────────────────────────────
 
     async def list_insurance(self, active_only: bool = False) -> list[InsuranceRead]:
         items = await self.repo.list_insurance(self.clinic_id, active_only=active_only)
@@ -102,8 +236,6 @@ class AdminService:
 
     async def delete_insurance(self, insurance_id: uuid.UUID) -> bool:
         return await self.repo.delete_insurance(insurance_id)
-
-    # ── Prompt Registry ─────────────────────────────────────────────────────
 
     async def list_prompts(self, agent: str | None = None) -> list[PromptRead]:
         items = await self.repo.list_prompts(self.clinic_id, agent=agent)
@@ -127,11 +259,8 @@ class AdminService:
         return PromptRead.model_validate(obj)
 
     async def get_active_prompt_content(self, agent: str) -> str | None:
-        """Return content of the active prompt for an agent, or None."""
         obj = await self.repo.get_active_prompt(self.clinic_id, agent)
         return obj.content if obj else None
-
-    # ── Specialties ─────────────────────────────────────────────────────────
 
     async def list_specialties(self, active_only: bool = False) -> list[SpecialtyRead]:
         items = await self.repo.list_specialties(self.clinic_id, active_only=active_only)

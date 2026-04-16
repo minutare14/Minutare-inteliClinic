@@ -145,6 +145,7 @@ export interface RagIngestResponse {
   chunks_embedded: number;
   chunks_failed: number;
   embedding_provider: string;
+  embedding_model: string;
 }
 
 export interface RagStats {
@@ -153,6 +154,10 @@ export interface RagStats {
   chunks_with_embedding: number;
   chunks_without_embedding: number;
   coverage_pct: number;
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_config_source: string;
+  config_error: string | null;
 }
 
 export interface ReindexResult {
@@ -160,6 +165,10 @@ export interface ReindexResult {
   processed: number;
   embedded: number;
   failed: number;
+  embedding_provider?: string;
+  embedding_model?: string;
+  embedding_config_source?: string;
+  config_error?: string | null;
   chunks_without_embedding?: number;
   coverage_pct?: number;
 }
@@ -217,6 +226,7 @@ export interface ClinicSettings {
   ai_provider: string | null;
   ai_model: string | null;
   embedding_provider: string | null;
+  embedding_model: string | null;
   rag_confidence_threshold: number;
   rag_top_k: number;
   rag_chunk_size: number;

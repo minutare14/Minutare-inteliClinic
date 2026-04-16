@@ -5,6 +5,8 @@ from datetime import datetime
 
 from sqlmodel import Field, SQLModel
 
+from app.core.embedding import DEFAULT_LOCAL_EMBEDDING_MODEL
+
 
 class ClinicSettings(SQLModel, table=True):
     """Configuração operacional da clínica — migra dados que antes ficavam só no .env."""
@@ -42,7 +44,8 @@ class ClinicSettings(SQLModel, table=True):
     # IA
     ai_provider: str | None = Field(default=None, max_length=64)
     ai_model: str | None = Field(default=None, max_length=128)
-    embedding_provider: str | None = Field(default="openai", max_length=64)
+    embedding_provider: str | None = Field(default="local", max_length=64)
+    embedding_model: str | None = Field(default=DEFAULT_LOCAL_EMBEDDING_MODEL, max_length=255)
     rag_confidence_threshold: float = Field(default=0.75)
     rag_top_k: int = Field(default=5)
     rag_chunk_size: int = Field(default=500)

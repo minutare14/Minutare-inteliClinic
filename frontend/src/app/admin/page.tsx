@@ -28,6 +28,12 @@ import { Card, CardBody } from "@/components/ui/card";
 
 type Tab = "clinica" | "branding" | "ia" | "convenios" | "especialidades" | "integracoes" | "logs" | "prompts";
 
+const EMBEDDING_MODEL_DEFAULTS: Record<string, string> = {
+  local: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  openai: "text-embedding-3-small",
+  gemini: "text-embedding-004",
+};
+
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("clinica");
 
@@ -343,6 +349,7 @@ function AITab() {
   const [form, setForm] = useState<Partial<ClinicSettings>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const val = <K extends keyof ClinicSettings>(field: K): ClinicSettings[K] | string =>
     (form[field] as ClinicSettings[K] | undefined) ?? (data?.[field] as ClinicSettings[K]) ?? "";
@@ -350,13 +357,23 @@ function AITab() {
   const set = (field: keyof ClinicSettings) => (v: string | number | boolean) =>
     setForm((p) => ({ ...p, [field]: v }));
 
+  const defaultEmbeddingModel = (provider: string) =>
+    EMBEDDING_MODEL_DEFAULTS[provider] ?? EMBEDDING_MODEL_DEFAULTS.local;
+
+  const selectedEmbeddingProvider = ((val("embedding_provider") as string) || "local").toLowerCase();
+  const selectedEmbeddingModel =
+    (val("embedding_model") as string) || defaultEmbeddingModel(selectedEmbeddingProvider);
+
   const save = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
       await updateClinicAI(form as Record<string, unknown>);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       refetch();
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : "Erro ao salvar configurações de embedding");
     } finally {
       setSaving(false);
     }
@@ -392,14 +409,32 @@ function AITab() {
             </Field>
             <Field label="Provider de Embedding">
               <select
-                value={(val("embedding_provider") as string) || "openai"}
-                onChange={(e) => set("embedding_provider")(e.target.value)}
+                value={selectedEmbeddingProvider}
+                onChange={(e) => {
+                  const nextProvider = e.target.value;
+                  set("embedding_provider")(nextProvider);
+                  set("embedding_model")(defaultEmbeddingModel(nextProvider));
+                  setSaveError(null);
+                }}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
               >
+                <option value="local">Local (Recomendado)</option>
                 <option value="openai">OpenAI</option>
                 <option value="gemini">Gemini</option>
               </select>
             </Field>
+            <Field label="Modelo de Embedding">
+              <Input
+                value={selectedEmbeddingModel}
+                onChange={(v) => set("embedding_model")(v)}
+                placeholder={defaultEmbeddingModel(selectedEmbeddingProvider)}
+              />
+            </Field>
+          </div>
+          <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+            {selectedEmbeddingProvider === "local"
+              ? "Local é o caminho oficial deste deploy: usa sentence-transformers no próprio backend e não exige chave externa."
+              : "Providers externos exigem chave configurada no backend e compatibilidade entre a dimensão do provider e o schema atual do banco. Se isso não estiver correto, o salvamento será bloqueado com erro explícito."}
           </div>
         </CardBody>
       </Card>
@@ -492,6 +527,11 @@ function AITab() {
       <div className="flex justify-end">
         <SaveButton onClick={save} loading={saving} saved={saved} />
       </div>
+      {saveError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {saveError}
+        </div>
+      )}
     </div>
   );
 }

@@ -18,7 +18,14 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.embedding import (
+    EmbeddingRuntimeConfig,
+    default_embedding_dimension,
+    default_embedding_model,
+    normalize_embedding_provider,
+)
 from app.models.rag import RagDocument
+from app.repositories.admin_repository import AdminRepository
 from app.repositories.rag_repository import RagRepository
 from app.schemas.rag import RagIngestResponse, RagQueryResult
 from app.services.audit_service import AuditService
@@ -60,36 +67,20 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
     return chunks
 
 
-def _configured_embedding_provider() -> str:
-    provider = (settings.embedding_provider or "local").strip().lower()
-    if provider == "groq":
-        logger.error(
-            "[RAG:embedding] embedding_generated=false provider=groq reason=invalid_provider "
-            "Groq does not support embeddings. Falling back to local."
-        )
-        return "local"
-    return provider or "local"
-
-
-def _default_embedding_model(provider: str) -> str:
-    if settings.embedding_model:
-        return settings.embedding_model
-    if provider == "openai":
-        return "text-embedding-3-small"
-    if provider == "gemini":
-        return "text-embedding-004"
-    return "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-
-
-def _normalize_embedding(vector: list[float] | None, provider: str) -> list[float] | None:
+def _normalize_embedding(
+    vector: list[float] | None,
+    provider: str,
+    *,
+    expected_dim: int,
+) -> list[float] | None:
     if vector is None:
         return None
-    if settings.embedding_dim and len(vector) != settings.embedding_dim:
+    if expected_dim and len(vector) != expected_dim:
         logger.error(
             "[RAG:embedding] embedding_generated=false provider=%s reason=dimension_mismatch "
             "expected_dim=%d actual_dim=%d",
             provider,
-            settings.embedding_dim,
+            expected_dim,
             len(vector),
         )
         return None
@@ -148,11 +139,16 @@ def _log_chunk_status(
     )
 
 
-async def _openai_embedding(text: str, *, phase: str) -> list[float] | None:
+async def _openai_embedding(
+    text: str,
+    *,
+    phase: str,
+    model: str,
+    expected_dim: int,
+) -> list[float] | None:
     import httpx
 
     provider = "openai"
-    model = _default_embedding_model(provider)
     t0 = time.monotonic()
     try:
         async with httpx.AsyncClient() as client:
@@ -164,7 +160,7 @@ async def _openai_embedding(text: str, *, phase: str) -> list[float] | None:
             )
             resp.raise_for_status()
             vector = resp.json()["data"][0]["embedding"]
-            vector = _normalize_embedding(vector, provider)
+            vector = _normalize_embedding(vector, provider, expected_dim=expected_dim)
             _log_embedding(vector=vector, provider=provider, model=model, phase=phase, t0=t0)
             return vector
     except Exception as exc:
@@ -180,11 +176,16 @@ async def _openai_embedding(text: str, *, phase: str) -> list[float] | None:
         return None
 
 
-async def _gemini_embedding(text: str, *, phase: str) -> list[float] | None:
+async def _gemini_embedding(
+    text: str,
+    *,
+    phase: str,
+    model: str,
+    expected_dim: int,
+) -> list[float] | None:
     import httpx
 
     provider = "gemini"
-    model = _default_embedding_model(provider)
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
         f":embedContent?key={settings.gemini_api_key}"
@@ -202,7 +203,7 @@ async def _gemini_embedding(text: str, *, phase: str) -> list[float] | None:
             )
             resp.raise_for_status()
             vector = resp.json()["embedding"]["values"]
-            vector = _normalize_embedding(vector, provider)
+            vector = _normalize_embedding(vector, provider, expected_dim=expected_dim)
             _log_embedding(vector=vector, provider=provider, model=model, phase=phase, t0=t0)
             return vector
     except Exception as exc:
@@ -218,12 +219,17 @@ async def _gemini_embedding(text: str, *, phase: str) -> list[float] | None:
         return None
 
 
-async def _local_embedding(text: str, *, phase: str) -> list[float] | None:
+async def _local_embedding(
+    text: str,
+    *,
+    phase: str,
+    model_name: str,
+    expected_dim: int,
+) -> list[float] | None:
     """Local embedding via sentence-transformers."""
     global _local_model, _local_model_lock, _local_model_name
 
     provider = "local"
-    model_name = _default_embedding_model(provider)
     t0 = time.monotonic()
 
     try:
@@ -240,11 +246,11 @@ async def _local_embedding(text: str, *, phase: str) -> list[float] | None:
         logger.exception("[RAG:embedding] sentence-transformers not installed: %s", exc)
         return None
 
-    if _local_model is None:
+    if _local_model is None or _local_model_name != model_name:
         if _local_model_lock is None:
             _local_model_lock = asyncio.Lock()
         async with _local_model_lock:
-            if _local_model is None:
+            if _local_model is None or _local_model_name != model_name:
                 logger.info(
                     "[RAG:embedding] provider=local model=%s status=loading",
                     model_name,
@@ -284,7 +290,7 @@ async def _local_embedding(text: str, *, phase: str) -> list[float] | None:
         )
         row = matrix[0]
         vector = row.tolist() if hasattr(row, "tolist") else list(row)
-        vector = _normalize_embedding(vector, provider)
+        vector = _normalize_embedding(vector, provider, expected_dim=expected_dim)
         _log_embedding(vector=vector, provider=provider, model=_local_model_name or model_name, phase=phase, t0=t0)
         return vector
     except Exception as exc:
@@ -300,20 +306,30 @@ async def _local_embedding(text: str, *, phase: str) -> list[float] | None:
         return None
 
 
-async def get_embedding(text: str, *, phase: str = "query") -> list[float] | None:
+async def get_embedding(
+    text: str,
+    *,
+    phase: str = "query",
+    embedding_config: EmbeddingRuntimeConfig | None = None,
+) -> list[float] | None:
     """
-    Return an embedding using the configured embedding provider.
-
-    Provider selection respects settings.embedding_provider:
-      - local  -> sentence-transformers (recommended)
-      - openai -> OpenAI embeddings
-      - gemini -> Gemini embeddings
-      - auto   -> openai -> gemini -> local
+    Return an embedding using the resolved embedding runtime config.
     """
-    provider = _configured_embedding_provider()
+    config = embedding_config or EmbeddingRuntimeConfig(
+        provider=_normalize_runtime_provider(settings.embedding_provider or "local"),
+        model=default_embedding_model(settings.embedding_provider or "local", settings.embedding_model),
+        schema_dimension=settings.embedding_dim,
+        source="env",
+    )
+    provider = config.provider
 
     if provider == "local":
-        return await _local_embedding(text, phase=phase)
+        return await _local_embedding(
+            text,
+            phase=phase,
+            model_name=config.model,
+            expected_dim=config.schema_dimension,
+        )
 
     if provider == "openai":
         if not settings.openai_api_key:
@@ -323,7 +339,12 @@ async def get_embedding(text: str, *, phase: str = "query") -> list[float] | Non
                 phase,
             )
             return None
-        return await _openai_embedding(text, phase=phase)
+        return await _openai_embedding(
+            text,
+            phase=phase,
+            model=config.model,
+            expected_dim=config.schema_dimension,
+        )
 
     if provider == "gemini":
         if not settings.gemini_api_key:
@@ -333,19 +354,61 @@ async def get_embedding(text: str, *, phase: str = "query") -> list[float] | Non
                 phase,
             )
             return None
-        return await _gemini_embedding(text, phase=phase)
+        return await _gemini_embedding(
+            text,
+            phase=phase,
+            model=config.model,
+            expected_dim=config.schema_dimension,
+        )
 
-    if settings.openai_api_key:
-        vector = await _openai_embedding(text, phase=phase)
-        if vector is not None:
-            return vector
+    if provider == "auto":
+        candidates: list[str] = []
+        if config.schema_dimension == default_embedding_dimension("openai") and settings.openai_api_key:
+            candidates.append("openai")
+        if config.schema_dimension == default_embedding_dimension("gemini") and settings.gemini_api_key:
+            candidates.append("gemini")
+        if config.schema_dimension == default_embedding_dimension("local"):
+            candidates.append("local")
 
-    if settings.gemini_api_key:
-        vector = await _gemini_embedding(text, phase=phase)
-        if vector is not None:
-            return vector
+        for candidate in candidates:
+            if candidate == "openai":
+                vector = await _openai_embedding(
+                    text,
+                    phase=phase,
+                    model=default_embedding_model("openai"),
+                    expected_dim=config.schema_dimension,
+                )
+            elif candidate == "gemini":
+                vector = await _gemini_embedding(
+                    text,
+                    phase=phase,
+                    model=default_embedding_model("gemini"),
+                    expected_dim=config.schema_dimension,
+                )
+            else:
+                vector = await _local_embedding(
+                    text,
+                    phase=phase,
+                    model_name=default_embedding_model("local"),
+                    expected_dim=config.schema_dimension,
+                )
+            if vector is not None:
+                return vector
 
-    return await _local_embedding(text, phase=phase)
+        logger.error(
+            "[RAG:embedding] phase=%s provider=auto embedding_generated=false "
+            "error=no_provider_available_for_schema_dimension_%d",
+            phase,
+            config.schema_dimension,
+        )
+        return None
+
+    return await _local_embedding(
+        text,
+        phase=phase,
+        model_name=default_embedding_model("local"),
+        expected_dim=config.schema_dimension,
+    )
 
 
 def _rows_to_results(rows: list[dict]) -> list[RagQueryResult]:
@@ -402,10 +465,113 @@ def _rerank_vector_rows(query_text: str, rows: list[dict]) -> list[dict]:
     return sorted(rows, key=rank, reverse=True)
 
 
+def _normalize_runtime_provider(raw_provider: str | None) -> str:
+    provider = normalize_embedding_provider(raw_provider or "local")
+    if provider == "groq":
+        logger.error(
+            "[RAG:config] invalid embedding provider 'groq' detected. Falling back to local."
+        )
+        return "local"
+    if provider not in {"local", "openai", "gemini", "auto"}:
+        logger.warning(
+            "[RAG:config] invalid embedding provider '%s' detected. Falling back to local.",
+            raw_provider,
+        )
+        return "local"
+    return provider
+
+
 class RagService:
     def __init__(self, session: AsyncSession) -> None:
         self.repo = RagRepository(session)
+        self.admin_repo = AdminRepository(session)
         self.audit = AuditService(session)
+
+    async def _resolve_embedding_config(self) -> EmbeddingRuntimeConfig:
+        clinic_cfg = await self.admin_repo.get_clinic_settings(settings.clinic_id)
+
+        env_provider = _normalize_runtime_provider(settings.embedding_provider or "local")
+        env_model = default_embedding_model(
+            env_provider if env_provider != "auto" else "local",
+            settings.embedding_model if settings.embedding_model else None,
+        )
+        env_config = EmbeddingRuntimeConfig(
+            provider=env_provider,
+            model=env_model,
+            schema_dimension=settings.embedding_dim,
+            source="env",
+        )
+        config = env_config
+
+        if clinic_cfg and clinic_cfg.embedding_provider:
+            clinic_provider = _normalize_runtime_provider(clinic_cfg.embedding_provider)
+            clinic_model = default_embedding_model(
+                clinic_provider if clinic_provider != "auto" else "local",
+                clinic_cfg.embedding_model,
+            )
+            clinic_config = EmbeddingRuntimeConfig(
+                provider=clinic_provider,
+                model=clinic_model,
+                schema_dimension=settings.embedding_dim,
+                source="clinic_settings",
+            )
+            clinic_error = self._embedding_config_error(clinic_config)
+            if clinic_error:
+                logger.warning(
+                    "[RAG:config] invalid clinic embedding config provider=%s model=%s "
+                    "reason=%s fallback_provider=%s fallback_model=%s",
+                    clinic_config.provider,
+                    clinic_config.model,
+                    clinic_error,
+                    env_config.provider,
+                    env_config.model,
+                )
+                config = EmbeddingRuntimeConfig(
+                    provider=env_config.provider,
+                    model=env_config.model,
+                    schema_dimension=env_config.schema_dimension,
+                    source="env_fallback",
+                )
+            else:
+                config = clinic_config
+
+        logger.info(
+            "[RAG:config] source=%s provider=%s model=%s schema_dimension=%d",
+            config.source,
+            config.provider,
+            config.model,
+            config.schema_dimension,
+        )
+        return config
+
+    def _embedding_config_error(self, config: EmbeddingRuntimeConfig) -> str | None:
+        if config.provider in {"local", "openai", "gemini"}:
+            expected_dim = default_embedding_dimension(config.provider)
+            if config.schema_dimension != expected_dim:
+                return (
+                    f"embedding_dimension_mismatch provider={config.provider} "
+                    f"expected_dim={expected_dim} schema_dim={config.schema_dimension}"
+                )
+
+        if config.provider == "openai" and not settings.openai_api_key:
+            return "openai_api_key_missing"
+
+        if config.provider == "gemini" and not settings.gemini_api_key:
+            return "gemini_api_key_missing"
+
+        if config.provider == "auto":
+            if config.schema_dimension == default_embedding_dimension("openai") and not settings.openai_api_key:
+                return "openai_api_key_missing"
+            if config.schema_dimension == default_embedding_dimension("gemini") and not settings.gemini_api_key:
+                return "gemini_api_key_missing"
+            if config.schema_dimension not in {
+                default_embedding_dimension("local"),
+                default_embedding_dimension("openai"),
+                default_embedding_dimension("gemini"),
+            }:
+                return f"unsupported_schema_dimension={config.schema_dimension}"
+
+        return None
 
     async def ingest_document(
         self,
@@ -427,7 +593,8 @@ class RagService:
 
         embedded_count = 0
         failed_count = 0
-        provider = _configured_embedding_provider()
+        embedding_config = await self._resolve_embedding_config()
+        config_error = self._embedding_config_error(embedding_config)
 
         for idx, chunk_content in enumerate(chunks):
             embedding: list[float] | None = None
@@ -435,13 +602,21 @@ class RagService:
             error: str | None = None
 
             try:
-                embedding = await get_embedding(chunk_content, phase="ingest")
-                if embedding is not None:
-                    embedded_count += 1
-                    chunk_status = "embedded"
-                else:
+                if config_error:
                     failed_count += 1
-                    error = "embedding_unavailable"
+                    error = config_error
+                else:
+                    embedding = await get_embedding(
+                        chunk_content,
+                        phase="ingest",
+                        embedding_config=embedding_config,
+                    )
+                    if embedding is not None:
+                        embedded_count += 1
+                        chunk_status = "embedded"
+                    else:
+                        failed_count += 1
+                        error = "embedding_unavailable"
             except Exception as exc:
                 failed_count += 1
                 error = str(exc)
@@ -473,13 +648,15 @@ class RagService:
 
         logger.info(
             "[RAG:ingest] document_id=%s title=%s chunks_total=%d chunks_embedded=%d "
-            "chunks_failed=%d embedding_provider=%s",
+            "chunks_failed=%d embedding_provider=%s embedding_model=%s config_source=%s",
             doc.id,
             title,
             len(chunks),
             embedded_count,
             failed_count,
-            provider,
+            embedding_config.provider,
+            embedding_config.model,
+            embedding_config.source,
         )
 
         await self.audit.log_event(
@@ -493,7 +670,10 @@ class RagService:
                 "chunks_total": len(chunks),
                 "chunks_embedded": embedded_count,
                 "chunks_failed": failed_count,
-                "embedding_provider": provider,
+                "embedding_provider": embedding_config.provider,
+                "embedding_model": embedding_config.model,
+                "embedding_config_source": embedding_config.source,
+                "config_error": config_error,
             },
         )
 
@@ -502,7 +682,8 @@ class RagService:
             chunks_created=len(chunks),
             chunks_embedded=embedded_count,
             chunks_failed=failed_count,
-            embedding_provider=provider,
+            embedding_provider=embedding_config.provider,
+            embedding_model=embedding_config.model,
         )
 
     async def query(
@@ -532,10 +713,25 @@ class RagService:
 
         embedded_chunks_available = await self.repo.has_embeddings(category)
         query_embedding_generated = False
+        embedding_config = await self._resolve_embedding_config()
+        config_error = self._embedding_config_error(embedding_config)
 
         if embedded_chunks_available:
-            query_embedding = await get_embedding(query_text, phase="query")
-            query_embedding_generated = query_embedding is not None
+            query_embedding = None
+            if config_error:
+                logger.warning(
+                    "[RAG:query] retrieval_mode=text rag_used=false reason=%s provider=%s model=%s",
+                    config_error,
+                    embedding_config.provider,
+                    embedding_config.model,
+                )
+            else:
+                query_embedding = await get_embedding(
+                    query_text,
+                    phase="query",
+                    embedding_config=embedding_config,
+                )
+                query_embedding_generated = query_embedding is not None
 
             if query_embedding is not None:
                 try:
@@ -622,19 +818,46 @@ class RagService:
         embedded_count = 0
         failed_count = 0
         documents_processed = len({chunk.document_id for chunk in chunks})
+        embedding_config = await self._resolve_embedding_config()
+        config_error = self._embedding_config_error(embedding_config)
 
         logger.info(
-            "[RAG:reindex] doc_scope=%s force=%s documents=%d chunks=%d",
+            "[RAG:reindex] doc_scope=%s force=%s documents=%d chunks=%d provider=%s model=%s source=%s",
             str(doc_id) if doc_id else "all",
             str(force).lower(),
             documents_processed,
             len(chunks),
+            embedding_config.provider,
+            embedding_config.model,
+            embedding_config.source,
         )
 
         for chunk in chunks:
             processed += 1
             try:
-                embedding = await get_embedding(chunk.content, phase="reindex")
+                if config_error:
+                    failed_count += 1
+                    await self.repo.update_chunk_indexing(
+                        chunk.id,
+                        embedding=None,
+                        embedded=False,
+                        embedding_error=config_error,
+                    )
+                    _log_chunk_status(
+                        operation="reindex",
+                        document_id=chunk.document_id,
+                        chunk_index=chunk.chunk_index,
+                        chunk_status="failed",
+                        embedding_generated=False,
+                        error=config_error,
+                    )
+                    continue
+
+                embedding = await get_embedding(
+                    chunk.content,
+                    phase="reindex",
+                    embedding_config=embedding_config,
+                )
                 if embedding is not None:
                     await self.repo.update_chunk_indexing(
                         chunk.id,
@@ -698,6 +921,10 @@ class RagService:
                 "chunks_embedded": embedded_count,
                 "chunks_failed": failed_count,
                 "force": force,
+                "embedding_provider": embedding_config.provider,
+                "embedding_model": embedding_config.model,
+                "embedding_config_source": embedding_config.source,
+                "config_error": config_error,
                 "chunks_without_embedding": stats["chunks_without_embedding"],
                 "coverage_pct": stats["coverage_pct"],
             },
@@ -705,25 +932,41 @@ class RagService:
 
         logger.info(
             "[RAG:reindex] completed documents=%d processed=%d embedded=%d failed=%d "
-            "chunks_without_embedding=%d coverage_pct=%.1f",
+            "chunks_without_embedding=%d coverage_pct=%.1f provider=%s model=%s",
             documents_processed,
             processed,
             embedded_count,
             failed_count,
             stats["chunks_without_embedding"],
             stats["coverage_pct"],
+            embedding_config.provider,
+            embedding_config.model,
         )
         return {
             "documents_processed": documents_processed,
             "processed": processed,
             "embedded": embedded_count,
             "failed": failed_count,
+            "embedding_provider": embedding_config.provider,
+            "embedding_model": embedding_config.model,
+            "embedding_config_source": embedding_config.source,
+            "config_error": config_error,
             "chunks_without_embedding": stats["chunks_without_embedding"],
             "coverage_pct": stats["coverage_pct"],
         }
 
     async def get_stats(self) -> dict:
-        return await self.repo.get_embedding_stats()
+        stats = await self.repo.get_embedding_stats()
+        embedding_config = await self._resolve_embedding_config()
+        stats.update(
+            {
+                "embedding_provider": embedding_config.provider,
+                "embedding_model": embedding_config.model,
+                "embedding_config_source": embedding_config.source,
+                "config_error": self._embedding_config_error(embedding_config),
+            }
+        )
+        return stats
 
     async def list_documents(self, category: str | None = None) -> list[RagDocument]:
         return await self.repo.list_documents(category)
