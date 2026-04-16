@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user, require_roles
 from app.core.db import get_session
+from app.models.auth import User, UserRole
 from app.schemas.admin import (
     AISettingsUpdate,
     BrandingUpdate,
@@ -25,11 +28,19 @@ from app.services.admin_service import AdminConfigError, AdminService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+# Admin read access: admin or manager
+_READ_ROLES = (UserRole.admin, UserRole.manager)
+# Admin write access: admin only
+_WRITE_ROLES = (UserRole.admin,)
+
 
 # ── Clinic Profile ──────────────────────────────────────────────────────────
 
 @router.get("/clinic", response_model=ClinicSettingsRead)
-async def get_clinic(session: AsyncSession = Depends(get_session)) -> ClinicSettingsRead:
+async def get_clinic(
+    current_user: Annotated[User, Depends(require_roles(*_READ_ROLES))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ClinicSettingsRead:
     svc = AdminService(session)
     return await svc.get_clinic_settings()
 
@@ -37,7 +48,8 @@ async def get_clinic(session: AsyncSession = Depends(get_session)) -> ClinicSett
 @router.patch("/clinic/profile", response_model=ClinicSettingsRead)
 async def update_clinic_profile(
     data: ClinicProfileUpdate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ClinicSettingsRead:
     svc = AdminService(session)
     return await svc.update_profile(data)
@@ -46,7 +58,8 @@ async def update_clinic_profile(
 @router.patch("/clinic/branding", response_model=ClinicSettingsRead)
 async def update_branding(
     data: BrandingUpdate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ClinicSettingsRead:
     svc = AdminService(session)
     return await svc.update_branding(data)
@@ -55,7 +68,8 @@ async def update_branding(
 @router.patch("/clinic/ai", response_model=ClinicSettingsRead)
 async def update_ai_settings(
     data: AISettingsUpdate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ClinicSettingsRead:
     svc = AdminService(session)
     try:
@@ -69,7 +83,8 @@ async def update_ai_settings(
 @router.get("/insurance", response_model=list[InsuranceRead])
 async def list_insurance(
     active_only: bool = False,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_READ_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> list[InsuranceRead]:
     svc = AdminService(session)
     return await svc.list_insurance(active_only=active_only)
@@ -78,7 +93,8 @@ async def list_insurance(
 @router.post("/insurance", response_model=InsuranceRead, status_code=201)
 async def create_insurance(
     data: InsuranceCreate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> InsuranceRead:
     svc = AdminService(session)
     return await svc.create_insurance(data)
@@ -88,7 +104,8 @@ async def create_insurance(
 async def update_insurance(
     insurance_id: uuid.UUID,
     data: InsuranceUpdate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> InsuranceRead:
     svc = AdminService(session)
     result = await svc.update_insurance(insurance_id, data)
@@ -100,7 +117,8 @@ async def update_insurance(
 @router.delete("/insurance/{insurance_id}", status_code=204)
 async def delete_insurance(
     insurance_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> None:
     svc = AdminService(session)
     ok = await svc.delete_insurance(insurance_id)
@@ -113,7 +131,8 @@ async def delete_insurance(
 @router.get("/prompts", response_model=list[PromptRead])
 async def list_prompts(
     agent: str | None = None,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_READ_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> list[PromptRead]:
     svc = AdminService(session)
     return await svc.list_prompts(agent=agent)
@@ -122,7 +141,8 @@ async def list_prompts(
 @router.post("/prompts", response_model=PromptRead, status_code=201)
 async def create_prompt(
     data: PromptCreate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> PromptRead:
     svc = AdminService(session)
     return await svc.create_prompt(data)
@@ -131,7 +151,8 @@ async def create_prompt(
 @router.get("/prompts/{prompt_id}", response_model=PromptRead)
 async def get_prompt(
     prompt_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_READ_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> PromptRead:
     svc = AdminService(session)
     result = await svc.get_prompt(prompt_id)
@@ -144,7 +165,8 @@ async def get_prompt(
 async def update_prompt(
     prompt_id: uuid.UUID,
     data: PromptUpdate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> PromptRead:
     svc = AdminService(session)
     result = await svc.update_prompt(prompt_id, data)
@@ -158,7 +180,8 @@ async def update_prompt(
 @router.get("/specialties", response_model=list[SpecialtyRead])
 async def list_specialties(
     active_only: bool = False,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_READ_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> list[SpecialtyRead]:
     svc = AdminService(session)
     return await svc.list_specialties(active_only=active_only)
@@ -167,7 +190,8 @@ async def list_specialties(
 @router.post("/specialties", response_model=SpecialtyRead, status_code=201)
 async def create_specialty(
     data: SpecialtyCreate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> SpecialtyRead:
     svc = AdminService(session)
     return await svc.create_specialty(data)
@@ -177,7 +201,8 @@ async def create_specialty(
 async def update_specialty(
     specialty_id: uuid.UUID,
     data: SpecialtyUpdate,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> SpecialtyRead:
     svc = AdminService(session)
     result = await svc.update_specialty(specialty_id, data)
@@ -189,7 +214,8 @@ async def update_specialty(
 @router.delete("/specialties/{specialty_id}", status_code=204)
 async def delete_specialty(
     specialty_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
+    current_user: Annotated[User, Depends(require_roles(*_WRITE_ROLES))] = None,
+    session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> None:
     svc = AdminService(session)
     ok = await svc.delete_specialty(specialty_id)

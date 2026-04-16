@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.services.reranker_service import build_reranker, RerankResult
 from app.core.embedding import (
     EmbeddingRuntimeConfig,
     default_embedding_dimension,
@@ -44,6 +45,14 @@ class RagQueryExecution:
     rag_used: bool
     embedded_chunks_available: bool
     query_embedding_generated: bool
+    # Reranker metadata (populated when RAG_RERANKER_ENABLED=true)
+    reranker_used: bool = False
+    reranker_model: str | None = None
+    reranker_top_k_initial: int = 0
+    reranker_top_k_final: int = 0
+    reranker_latency_ms: float = 0.0
+    reranker_fallback: bool = False
+    reranker_ranking_changed: bool = False
 
 
 def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
@@ -486,6 +495,11 @@ class RagService:
         self.repo = RagRepository(session)
         self.admin_repo = AdminRepository(session)
         self.audit = AuditService(session)
+        # Reranker: built from config. NoOp when RAG_RERANKER_ENABLED=false.
+        self._reranker = build_reranker(
+            enabled=settings.rag_reranker_enabled,
+            model_name=settings.rag_reranker_model,
+        )
 
     async def _resolve_embedding_config(self) -> EmbeddingRuntimeConfig:
         clinic_cfg = await self.admin_repo.get_clinic_settings(settings.clinic_id)
@@ -702,15 +716,31 @@ class RagService:
         category: str | None = None,
     ) -> RagQueryExecution:
         """
-        Query the RAG index with explicit retrieval mode tracking.
+        Query the RAG index with two-stage retrieval and optional cross-encoder reranking.
 
-        Decision order:
-          1. If embedded chunks exist, try vector search.
-          2. If vector is unavailable or empty, fall back to text search.
+        Pipeline:
+          1. Vector search (pgvector) → top_k_initial candidates
+          2. Lexical rerank (fast, always applied to vector results)
+          3. Cross-encoder rerank (if RAG_RERANKER_ENABLED=true)
+          4. Slice to top_k_final → send to LLM
+          5. Fall back to text search if embeddings unavailable
+
+        Config:
+          RAG_RERANKER_ENABLED      — enable/disable cross-encoder (default: false)
+          RAG_RERANKER_TOP_K_INITIAL — candidates from pgvector (default: 20)
+          RAG_RERANKER_TOP_K_FINAL   — chunks to LLM (default: 5)
+          RAG_TOP_K                  — used when reranker is disabled (default: 5)
         """
-        k = top_k or settings.rag_top_k
-        t0 = time.monotonic()
+        # When reranker is active, retrieve more candidates for reranking.
+        reranker_active = settings.rag_reranker_enabled and self._reranker.model_name != "noop"
+        if reranker_active:
+            k_initial = settings.rag_reranker_top_k_initial
+            k_final = top_k or settings.rag_reranker_top_k_final
+        else:
+            k_initial = top_k or settings.rag_top_k
+            k_final = k_initial
 
+        t0 = time.monotonic()
         embedded_chunks_available = await self.repo.has_embeddings(category)
         query_embedding_generated = False
         embedding_config = await self._resolve_embedding_config()
@@ -735,30 +765,97 @@ class RagService:
 
             if query_embedding is not None:
                 try:
-                    rows = await self.repo.search_similar(query_embedding, top_k=k, category=category)
+                    # Stage 1: vector retrieval (larger pool when reranker active)
+                    rows = await self.repo.search_similar(
+                        query_embedding, top_k=k_initial, category=category
+                    )
+
+                    # Stage 2: lexical boost (fast, always applied)
                     rows = _rerank_vector_rows(query_text, rows)
-                    latency = time.monotonic() - t0
-                    if rows:
+
+                    latency_vector = time.monotonic() - t0
+
+                    if not rows:
                         logger.info(
-                            "[RAG:query] retrieval_mode=vector top_k=%d results=%d rag_used=true latency=%.3fs",
-                            k,
-                            len(rows),
-                            latency,
+                            "[RAG:query] retrieval_mode=vector top_k=%d results=0 "
+                            "rag_used=false latency=%.3fs fallback=text",
+                            k_initial, latency_vector,
                         )
-                        return RagQueryExecution(
-                            results=_rows_to_results(rows),
+                    else:
+                        rerank_result = None
+                        reranker_used = False
+
+                        # Stage 3: cross-encoder reranking (if enabled)
+                        if reranker_active:
+                            rerank_result = await self._reranker.rerank(
+                                query_text, rows, top_k=k_final
+                            )
+                            reranker_used = True
+
+                            # Log initial vs. final ranking
+                            logger.info(
+                                "[RAG:query] reranker=true model='%s' "
+                                "top_k_initial=%d top_k_final=%d "
+                                "ranking_changed=%s reranker_latency_ms=%.1f "
+                                "fallback=%s",
+                                rerank_result.model_used,
+                                rerank_result.top_k_initial,
+                                rerank_result.top_k_final,
+                                str(rerank_result.ranking_changed).lower(),
+                                rerank_result.latency_ms,
+                                str(rerank_result.fallback_used).lower(),
+                            )
+                            for c in rerank_result.candidates[:5]:
+                                logger.info(
+                                    "[RAG:query] reranked rank=%d chunk_id=%s "
+                                    "vector_score=%.4f reranker_score=%.4f title='%s'",
+                                    c.final_rank, c.chunk_id,
+                                    c.vector_score, c.reranker_score,
+                                    c.title[:60],
+                                )
+
+                            # Convert RerankCandidate → row dicts for _rows_to_results
+                            final_rows = [
+                                {
+                                    "chunk_id": c.chunk_id,
+                                    "document_id": c.document_id,
+                                    "document_title": c.title,
+                                    "content": c.content,
+                                    "category": c.category,
+                                    "score": c.reranker_score,
+                                }
+                                for c in rerank_result.candidates
+                            ]
+                        else:
+                            # No reranker — slice to k_final from lexical-boosted order
+                            final_rows = rows[:k_final]
+
+                        total_latency = time.monotonic() - t0
+                        logger.info(
+                            "[RAG:query] retrieval_mode=vector top_k_initial=%d "
+                            "top_k_final=%d results=%d reranker=%s rag_used=true "
+                            "total_latency=%.3fs",
+                            k_initial, k_final, len(final_rows),
+                            str(reranker_used).lower(), total_latency,
+                        )
+
+                        execution = RagQueryExecution(
+                            results=_rows_to_results(final_rows),
                             retrieval_mode="vector",
                             rag_used=True,
                             embedded_chunks_available=True,
                             query_embedding_generated=True,
+                            reranker_used=reranker_used,
                         )
+                        if rerank_result:
+                            execution.reranker_model = rerank_result.model_used
+                            execution.reranker_top_k_initial = rerank_result.top_k_initial
+                            execution.reranker_top_k_final = rerank_result.top_k_final
+                            execution.reranker_latency_ms = rerank_result.latency_ms
+                            execution.reranker_fallback = rerank_result.fallback_used
+                            execution.reranker_ranking_changed = rerank_result.ranking_changed
+                        return execution
 
-                    logger.info(
-                        "[RAG:query] retrieval_mode=vector top_k=%d results=0 rag_used=false "
-                        "latency=%.3fs fallback=text",
-                        k,
-                        latency,
-                    )
                 except Exception as exc:
                     await self.repo.session.rollback()
                     logger.exception(
@@ -767,21 +864,20 @@ class RagService:
                     )
             else:
                 logger.warning(
-                    "[RAG:query] retrieval_mode=text rag_used=false reason=query_embedding_unavailable",
+                    "[RAG:query] retrieval_mode=text rag_used=false "
+                    "reason=query_embedding_unavailable",
                 )
         else:
             logger.info(
                 "[RAG:query] retrieval_mode=text rag_used=false reason=no_embedded_chunks",
             )
 
-        rows = await self.repo.text_search(query_text, top_k=k, category=category)
+        # Fallback: text search
+        rows = await self.repo.text_search(query_text, top_k=k_final, category=category)
         latency = time.monotonic() - t0
         logger.info(
             "[RAG:query] retrieval_mode=text top_k=%d results=%d rag_used=%s latency=%.3fs",
-            k,
-            len(rows),
-            str(bool(rows)).lower(),
-            latency,
+            k_final, len(rows), str(bool(rows)).lower(), latency,
         )
         return RagQueryExecution(
             results=_rows_to_results(rows),

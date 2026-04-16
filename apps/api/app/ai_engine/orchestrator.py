@@ -84,6 +84,14 @@ class ConversationState:
     tool_used: str | None = None           # "schedule_actions" | "rag_service" | None
     handoff_triggered: bool = False
     handoff_reason: str | None = None
+    # Reranker fields (populated when RAG_RERANKER_ENABLED=true and rag path taken)
+    reranker_used: bool = False
+    reranker_model: str | None = None
+    reranker_top_k_initial: int = 0
+    reranker_top_k_final: int = 0
+    reranker_latency_ms: float = 0.0
+    reranker_fallback: bool = False
+    reranker_ranking_changed: bool = False
 
     # Operational validity flags (live data checks)
     active_only_applied: bool = True       # professionals always filtered by active=True
@@ -405,6 +413,14 @@ class AIOrchestrator:
         state.retrieval_mode = composed.retrieval_mode
         state.tool_used = "rag_service" if composed.rag_used else None
         state.response_mode = composed.mode
+        # Propagate reranker telemetry
+        state.reranker_used = composed.reranker_used
+        state.reranker_model = composed.reranker_model
+        state.reranker_top_k_initial = composed.reranker_top_k_initial
+        state.reranker_top_k_final = composed.reranker_top_k_final
+        state.reranker_latency_ms = composed.reranker_latency_ms
+        state.reranker_fallback = composed.reranker_fallback
+        state.reranker_ranking_changed = composed.reranker_ranking_changed
 
         if composed.rag_used:
             state.route = "rag_retrieval"
@@ -536,6 +552,14 @@ class AIOrchestrator:
                     "prompt_source": state.prompt_source,
                     "specialties_source": state.specialties_source,
                     "insurance_catalog_size": state.insurance_catalog_size,
+                    # Reranker
+                    "reranker_used": state.reranker_used,
+                    "reranker_model": state.reranker_model,
+                    "reranker_top_k_initial": state.reranker_top_k_initial,
+                    "reranker_top_k_final": state.reranker_top_k_final,
+                    "reranker_latency_ms": round(state.reranker_latency_ms, 2),
+                    "reranker_fallback": state.reranker_fallback,
+                    "reranker_ranking_changed": state.reranker_ranking_changed,
                     # Guardrails
                     "guardrail_pre": state.guardrail_pre,
                     "guardrail_post": state.guardrail_post,

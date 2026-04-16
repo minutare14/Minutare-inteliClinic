@@ -25,6 +25,14 @@ class ComposedResponse:
     insurance_injected: bool = False
     retrieval_mode: str = "none"
     fallback_used: bool = False
+    # Reranker metadata forwarded from RagQueryExecution
+    reranker_used: bool = False
+    reranker_model: str | None = None
+    reranker_top_k_initial: int = 0
+    reranker_top_k_final: int = 0
+    reranker_latency_ms: float = 0.0
+    reranker_fallback: bool = False
+    reranker_ranking_changed: bool = False
 
 
 class ResponseComposer:
@@ -44,6 +52,7 @@ class ResponseComposer:
     ) -> ComposedResponse:
         rag_results: list[dict] | None = None
         retrieval_mode = "none"
+        rag_execution = None
 
         if faro.intent in RAG_INTENTS:
             rag_execution = await self._query_rag(user_text, top_k=rag_top_k)
@@ -99,7 +108,7 @@ class ResponseComposer:
             str(used_llm).lower(),
             str(not bool(rag_results)).lower(),
         )
-        return ComposedResponse(
+        resp = ComposedResponse(
             text=text,
             mode=mode,
             rag_used=bool(rag_results),
@@ -108,6 +117,18 @@ class ResponseComposer:
             retrieval_mode=retrieval_mode,
             fallback_used=not bool(rag_results),
         )
+
+        # Propagate reranker metadata from the execution
+        if faro.intent in RAG_INTENTS and rag_execution is not None:
+            resp.reranker_used = rag_execution.reranker_used
+            resp.reranker_model = rag_execution.reranker_model
+            resp.reranker_top_k_initial = rag_execution.reranker_top_k_initial
+            resp.reranker_top_k_final = rag_execution.reranker_top_k_final
+            resp.reranker_latency_ms = rag_execution.reranker_latency_ms
+            resp.reranker_fallback = rag_execution.reranker_fallback
+            resp.reranker_ranking_changed = rag_execution.reranker_ranking_changed
+
+        return resp
 
     async def _query_rag(self, text: str, top_k: int | None = None) -> RagQueryExecution:
         return await self.rag_svc.query_with_metadata(text, top_k=top_k)

@@ -25,6 +25,12 @@ dependencies = [
     "python-multipart>=0.0.12",
     "python-dateutil>=2.9.0",
 
+    # --- Auth / JWT ---
+    # JWT token generation and validation
+    "PyJWT>=2.8.0",
+    # Password hashing (bcrypt)
+    "passlib[bcrypt]>=1.7.4",
+
     # --- Embeddings locais (ONNX, sem PyTorch, gratuito) ---
     # Usado quando EMBEDDING_PROVIDER=local ou auto sem API keys configuradas
     # Modelo padrão: paraphrase-multilingual-MiniLM-L12-v2 (384 dims, PT-BR)

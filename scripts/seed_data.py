@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Seed the database with production-ready sample data.
+Seed the database with initial data for a new clinic deploy.
 
 Works in two modes:
   --mode api    → Seeds via HTTP API (requires running server)
@@ -9,30 +9,39 @@ Works in two modes:
 Usage:
     python scripts/seed_data.py --mode db
     python scripts/seed_data.py --mode api --api-url http://localhost:8000
+
+NOTE: RAG documents use CLINIC_NAME from environment.
+All clinic-specific content (name, phone, address) must be configured via
+the Admin panel or environment variables after the initial seed.
+This script seeds demo data only. Replace with real clinic data before production.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
 # Support both local dev and Docker container contexts.
-# Local:  script at <root>/scripts/ → API at <root>/apps/api/
-# Docker: script at /app/scripts/   → API at /app/  (app/ is directly under WORKDIR)
 _script_dir = Path(__file__).resolve().parent
 _project_root = _script_dir.parent
 if (_project_root / "app").is_dir():
-    # Docker context: /app/app/main.py exists
     sys.path.insert(0, str(_project_root))
 else:
-    # Local dev context: <root>/apps/api/app/main.py
     sys.path.insert(0, str(_project_root / "apps" / "api"))
 
 
+# ── Clinic name from env (no hardcodes) ───────────────────────
+_CLINIC_NAME = os.environ.get("CLINIC_NAME", "nossa clínica")
+_CLINIC_PHONE = os.environ.get("CLINIC_PHONE", "(00) 0000-0000")
+_CLINIC_ADDRESS = os.environ.get("CLINIC_ADDRESS", "endereço a configurar no Admin")
+
+
 # ── Data definitions ──────────────────────────────────────────
+# DEMO DATA — Replace with real professionals before production deploy.
 
 PROFESSIONALS = [
     {"full_name": "Dra. Maria Silva", "specialty": "Clínica Geral", "crm": "CRM/SP 123456"},
@@ -71,12 +80,13 @@ PATIENTS = [
     },
 ]
 
+# RAG documents use clinic name from env — no hardcoded clinic identity.
 RAG_DOCUMENTS = [
     {
         "title": "Horário de Funcionamento",
         "category": "faq",
         "content": (
-            "A Clínica Minutare Med funciona de segunda a sexta-feira, das 7h às 20h, "
+            f"A {_CLINIC_NAME} funciona de segunda a sexta-feira, das 7h às 20h, "
             "e aos sábados das 8h às 13h. Domingos e feriados não há atendimento presencial, "
             "mas nosso atendimento virtual via Telegram está disponível 24 horas para "
             "agendamentos, dúvidas e remarcações."
@@ -86,7 +96,7 @@ RAG_DOCUMENTS = [
         "title": "Convênios Aceitos",
         "category": "convenio",
         "content": (
-            "A Clínica Minutare Med aceita os seguintes convênios: Unimed, Bradesco Saúde, "
+            f"A {_CLINIC_NAME} aceita os seguintes convênios: Unimed, Bradesco Saúde, "
             "SulAmérica, Amil, Notre Dame Intermédica, Porto Seguro Saúde, "
             "Hapvida, Prevent Senior, e Particular. "
             "Para verificar a cobertura do seu plano para procedimentos específicos, "
@@ -98,7 +108,7 @@ RAG_DOCUMENTS = [
         "title": "Especialidades Disponíveis",
         "category": "especialidades",
         "content": (
-            "A Clínica Minutare Med oferece atendimento nas seguintes especialidades: "
+            f"A {_CLINIC_NAME} oferece atendimento nas seguintes especialidades: "
             "Clínica Geral, Cardiologia, Dermatologia, Ortopedia, Ginecologia, "
             "Pediatria, Endocrinologia e Neurologia. "
             "Cada especialidade conta com profissionais experientes e "
@@ -148,12 +158,9 @@ RAG_DOCUMENTS = [
         "title": "Endereço e Como Chegar",
         "category": "faq",
         "content": (
-            "A Clínica Minutare Med está localizada na Av. Paulista, 1000, "
-            "Conjunto 501, Bela Vista, São Paulo — SP, CEP 01310-100. "
-            "Referência: próximo à estação Trianon-Masp do Metrô. "
-            "Estacionamento conveniado no edifício com desconto para pacientes. "
-            "Acessibilidade: o prédio possui rampa de acesso e elevador. "
-            "Telefone: (11) 3000-0000. WhatsApp: (11) 99000-0000."
+            f"A {_CLINIC_NAME} está localizada em: {_CLINIC_ADDRESS}. "
+            "Verifique o endereço atualizado no painel Admin ou entre em contato "
+            f"pelo telefone: {_CLINIC_PHONE}."
         ),
     },
     {
@@ -360,8 +367,8 @@ def main() -> None:
     parser.add_argument("--api-url", default="http://localhost:8000", help="API base URL")
     parser.add_argument(
         "--database-url",
-        default="postgresql+asyncpg://minutare:minutare@localhost:5432/minutare_med",
-        help="Database URL (for --mode db)",
+        default=os.environ.get("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/inteliclinic"),
+        help="Database URL (for --mode db). Defaults to DATABASE_URL env var.",
     )
     args = parser.parse_args()
 
