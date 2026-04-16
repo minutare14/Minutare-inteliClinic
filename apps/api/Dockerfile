@@ -28,7 +28,10 @@ RUN pip install --no-cache-dir \
     "pgvector>=0.3.6" \
     "python-multipart>=0.0.12" \
     "python-dateutil>=2.9.0" \
-    "sentence-transformers>=3.4.0"
+    "sentence-transformers>=3.4.0" \
+    "PyJWT>=2.8.0" \
+    "passlib[bcrypt]>=1.7.4" \
+    "email-validator>=2.0.0"
 
 # Copy application code
 COPY apps/api/app/ ./app/

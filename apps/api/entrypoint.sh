@@ -5,7 +5,7 @@ set -e
 set -x  # Habilita modo verbose para logs extremos no Dokploy
 
 echo "======================================================"
-echo "  Minutare InteliClinic — API Starting"
+echo "  IntelliClinic — API Starting"
 echo "  ENV: ${APP_ENV:-production}"
 echo "======================================================"
 
