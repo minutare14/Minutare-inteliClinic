@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     admin_default_email: str = "admin@clinic.local"
     admin_default_password: str = "change-me-on-first-login"
 
+    # ── Google Calendar OAuth2 ─────────────────────────────────────────────────
+    # Obtain from Google Cloud Console → APIs & Services → Credentials
+    # Redirect URI must match exactly what's registered there.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""  # e.g. https://api.yourdomain.com/api/v1/google/callback
+
+    # ── Background workers ────────────────────────────────────────────────────
+    # How often the follow-up worker polls for overdue items (seconds)
+    followup_worker_interval_seconds: int = 300  # 5 minutes
+
     @property
     def is_dev(self) -> bool:
         return self.app_env == "development"

@@ -57,6 +57,9 @@ class ClinicSettings(SQLModel, table=True):
     # Persona do bot
     bot_persona: str | None = Field(default=None)  # texto livre de persona
 
+    # Google Calendar integration — stores JSON-encoded OAuth2 tokens
+    google_calendar_token: str | None = Field(default=None)
+
     # Controle
     active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)

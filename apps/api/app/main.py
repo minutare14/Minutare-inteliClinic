@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -65,8 +66,19 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("[STARTUP] Falha ao seed admin user — continuando")
 
+    # ── Background workers ────────────────────────────────────────────────────
+    from app.workers.followup_worker import run_followup_worker
+    worker_task = asyncio.create_task(run_followup_worker(), name="followup_worker")
+
     logger.info("API Startup completo. Aguardando conexões.")
     yield
+
+    # Graceful shutdown — cancel the background worker
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
     logger.info("IntelliClinic API shutting down")
 
 
@@ -105,6 +117,7 @@ from app.api.routes.dashboard import router as dashboard_router  # noqa: E402
 from app.api.routes.professionals import router as professionals_router  # noqa: E402
 from app.api.routes.admin import router as admin_router  # noqa: E402
 from app.api.routes.crm import router as crm_router  # noqa: E402
+from app.api.routes.google import router as google_router  # noqa: E402
 
 API_PREFIX = "/api/v1"
 
@@ -121,3 +134,4 @@ app.include_router(dashboard_router, prefix=API_PREFIX)
 app.include_router(professionals_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(crm_router, prefix=API_PREFIX)
+app.include_router(google_router, prefix=API_PREFIX)
