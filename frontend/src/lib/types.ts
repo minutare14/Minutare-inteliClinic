@@ -272,6 +272,42 @@ export interface ClinicSpecialty {
   created_at: string;
 }
 
+// ── CRM ──────────────────────────────────────────────────────────────────────
+
+export interface CrmLead {
+  id: string;
+  full_name: string;
+  phone: string | null;
+  stage: string;
+  tags: string[];
+  source: string | null;
+  crm_notes: string | null;
+  created_at: string;
+}
+
+export interface CrmStats {
+  stages: { lead: number; patient: number; inactive: number };
+  pending_followups: number;
+  open_alerts: number;
+}
+
+export interface CrmFollowUp {
+  id: string;
+  patient_id: string;
+  type: string;
+  scheduled_at: string;
+  notes: string | null;
+}
+
+export interface CrmAlert {
+  id: string;
+  patient_id: string | null;
+  type: string;
+  message: string;
+  priority: string;
+  created_at: string;
+}
+
 // ── Pipeline ─────────────────────────────────────────────────────────────────
 
 export interface PipelineStep {

@@ -26,6 +26,10 @@ import type {
   ClinicSpecialty,
   PipelineTrace,
   PipelineStep,
+  CrmLead,
+  CrmStats,
+  CrmFollowUp,
+  CrmAlert,
 } from "./types";
 
 async function fetchApi<T>(
@@ -364,3 +368,42 @@ export async function loginApi(email: string, password: string): Promise<LoginRe
 export async function getMeApi(token: string): Promise<AuthUserResponse> {
   return fetchApi<AuthUserResponse>(`${API_PREFIX}/auth/me`, {}, token);
 }
+
+// ── CRM ───────────────────────────────────────────────────────────────────────
+
+export const getCrmLeads = (stage?: string) => {
+  const params = new URLSearchParams();
+  if (stage) params.set("stage", stage);
+  return fetchApi<CrmLead[]>(`${API_PREFIX}/crm/leads?${params}`);
+};
+
+export const updateLeadStage = (patientId: string, stage: string) =>
+  fetchApi<{ id: string; stage: string }>(`${API_PREFIX}/crm/leads/${patientId}/stage`, {
+    method: "PATCH",
+    body: JSON.stringify({ stage }),
+  });
+
+export const addLeadNote = (patientId: string, note: string) =>
+  fetchApi<{ id: string; crm_notes: string }>(`${API_PREFIX}/crm/leads/${patientId}/notes`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
+
+export const getCrmStats = () =>
+  fetchApi<CrmStats>(`${API_PREFIX}/crm/stats`);
+
+export const getPendingFollowUps = () =>
+  fetchApi<CrmFollowUp[]>(`${API_PREFIX}/crm/followups/pending`);
+
+export const completeFollowUp = (id: string) =>
+  fetchApi<{ id: string; completed: boolean }>(`${API_PREFIX}/crm/followups/${id}/complete`, {
+    method: "PATCH",
+  });
+
+export const getOpenAlerts = () =>
+  fetchApi<CrmAlert[]>(`${API_PREFIX}/crm/alerts`);
+
+export const resolveAlert = (id: string) =>
+  fetchApi<{ id: string; resolved: boolean }>(`${API_PREFIX}/crm/alerts/${id}/resolve`, {
+    method: "PATCH",
+  });
