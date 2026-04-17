@@ -99,7 +99,7 @@ async def login(
         )
 
     # Update last_login_at
-    user.last_login_at = datetime.now(timezone.utc)
+    user.last_login_at = datetime.now(timezone.utc).replace(tzinfo=None)
     session.add(user)
     await session.commit()
 
@@ -193,7 +193,7 @@ async def update_user(
     if body.password:
         user.hashed_password = hash_password(body.password)
 
-    user.updated_at = datetime.now(timezone.utc)
+    user.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     session.add(user)
     await session.commit()
     await session.refresh(user)

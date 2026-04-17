@@ -58,7 +58,7 @@ class CrmService:
 
         if patient.stage != "patient":
             patient.stage = "patient"
-            patient.updated_at = datetime.now(timezone.utc)
+            patient.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
             self.session.add(patient)
             await self.session.commit()
             await self.session.refresh(patient)
@@ -86,7 +86,7 @@ class CrmService:
 
         old_stage = patient.stage
         patient.stage = stage
-        patient.updated_at = datetime.now(timezone.utc)
+        patient.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self.session.add(patient)
         await self.session.commit()
         await self.session.refresh(patient)
@@ -114,7 +114,7 @@ class CrmService:
         existing = set(patient.tags.split(",")) if patient.tags else set()
         updated = existing | set(t.strip() for t in new_tags if t.strip())
         patient.tags = ",".join(sorted(updated))
-        patient.updated_at = datetime.now(timezone.utc)
+        patient.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self.session.add(patient)
         await self.session.commit()
         await self.session.refresh(patient)
@@ -130,12 +130,12 @@ class CrmService:
         if not patient:
             return None
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        timestamp = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M")
         new_note = f"[{timestamp}] {actor_id}: {note}"
         patient.crm_notes = (
             f"{patient.crm_notes}\n{new_note}" if patient.crm_notes else new_note
         )
-        patient.updated_at = datetime.now(timezone.utc)
+        patient.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self.session.add(patient)
         await self.session.commit()
         await self.session.refresh(patient)
@@ -189,7 +189,7 @@ class CrmService:
         if not fu:
             return None
         fu.completed = True
-        fu.completed_at = datetime.now(timezone.utc)
+        fu.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self.session.add(fu)
         await self.session.commit()
         await self.session.refresh(fu)
@@ -237,7 +237,7 @@ class CrmService:
         if not alert:
             return None
         alert.resolved = True
-        alert.resolved_at = datetime.now(timezone.utc)
+        alert.resolved_at = datetime.now(timezone.utc).replace(tzinfo=None)
         self.session.add(alert)
         await self.session.commit()
         await self.session.refresh(alert)

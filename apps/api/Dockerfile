@@ -41,6 +41,7 @@ RUN pip install --no-cache-dir \
     "sentence-transformers>=3.4.0" \
     "PyJWT>=2.8.0" \
     "passlib[bcrypt]>=1.7.4" \
+    "bcrypt>=3.2,<4.1" \
     "email-validator>=2.0.0"
 
 # Copy application code
