@@ -108,6 +108,23 @@ class ConversationState:
 
     # Response mode
     response_mode: str = "unknown"
+    # LangGraph / document pipeline
+    langgraph_used: bool = False
+    document_grading_used: bool = False
+    document_grading_threshold: float = 0.0
+    document_grading_strategy: str = "disabled"
+    approved_document_count: int = 0
+    rejected_document_count: int = 0
+    query_rewrite_used: bool = False
+    query_rewrite_attempts: int = 0
+    rewritten_query: str | None = None
+    retrieval_attempts: int = 0
+    initial_candidate_count: int = 0
+    final_candidate_count: int = 0
+    prompt_source_query_rewrite: str = "default"
+    prompt_source_document_grading: str = "default"
+    selected_chunks: list[dict] = field(default_factory=list)
+    composer_audit_payload: dict = field(default_factory=dict)
 
 
 # ─── Engine Response ──────────────────────────────────────────────────────────
@@ -149,7 +166,7 @@ class AIOrchestrator:
         self.schedule_actions = ScheduleActions(session)
         self.admin_repo = AdminRepository(session)
         self.audit_svc = AuditService(session)
-        self.composer = ResponseComposer(self.rag_svc)
+        self.composer = ResponseComposer(self.rag_svc, self.admin_repo)
         self.structured_lookup = StructuredLookup(session)
 
     async def process_message(
@@ -402,11 +419,13 @@ class AIOrchestrator:
             context=context,
             faro=faro,
             user_text=user_text,
+            clinic_cfg=clinic_cfg,
             clinic_name=clinic_name,
             chatbot_name=chatbot_name,
             custom_system_prompt=custom_system_prompt,
             insurance_context=insurance_context,
             rag_top_k=rag_top_k_override,
+            prompt_source=state.prompt_source,
         )
         raw_response = composed.text
         state.rag_used = composed.rag_used
@@ -421,6 +440,23 @@ class AIOrchestrator:
         state.reranker_latency_ms = composed.reranker_latency_ms
         state.reranker_fallback = composed.reranker_fallback
         state.reranker_ranking_changed = composed.reranker_ranking_changed
+        # Propagate LangGraph / document pipeline telemetry
+        state.langgraph_used = composed.langgraph_used
+        state.document_grading_used = composed.document_grading_used
+        state.document_grading_threshold = composed.document_grading_threshold
+        state.document_grading_strategy = composed.document_grading_strategy
+        state.approved_document_count = composed.approved_document_count
+        state.rejected_document_count = composed.rejected_document_count
+        state.query_rewrite_used = composed.query_rewrite_used
+        state.query_rewrite_attempts = composed.query_rewrite_attempts
+        state.rewritten_query = composed.rewritten_query
+        state.retrieval_attempts = composed.retrieval_attempts
+        state.initial_candidate_count = composed.initial_candidate_count
+        state.final_candidate_count = composed.final_candidate_count
+        state.prompt_source_query_rewrite = composed.prompt_source_query_rewrite
+        state.prompt_source_document_grading = composed.prompt_source_document_grading
+        state.selected_chunks = composed.selected_chunks
+        state.composer_audit_payload = composed.audit_payload
 
         if composed.rag_used:
             state.route = "rag_retrieval"
@@ -560,6 +596,22 @@ class AIOrchestrator:
                     "reranker_latency_ms": round(state.reranker_latency_ms, 2),
                     "reranker_fallback": state.reranker_fallback,
                     "reranker_ranking_changed": state.reranker_ranking_changed,
+                    # LangGraph / document pipeline
+                    "langgraph_used": state.langgraph_used,
+                    "document_grading_used": state.document_grading_used,
+                    "document_grading_threshold": round(state.document_grading_threshold, 3),
+                    "document_grading_strategy": state.document_grading_strategy,
+                    "approved_document_count": state.approved_document_count,
+                    "rejected_document_count": state.rejected_document_count,
+                    "query_rewrite_used": state.query_rewrite_used,
+                    "query_rewrite_attempts": state.query_rewrite_attempts,
+                    "rewritten_query": state.rewritten_query,
+                    "retrieval_attempts": state.retrieval_attempts,
+                    "initial_candidate_count": state.initial_candidate_count,
+                    "final_candidate_count": state.final_candidate_count,
+                    "prompt_source_query_rewrite": state.prompt_source_query_rewrite,
+                    "prompt_source_document_grading": state.prompt_source_document_grading,
+                    "selected_chunks": state.selected_chunks[:5],
                     # Guardrails
                     "guardrail_pre": state.guardrail_pre,
                     "guardrail_post": state.guardrail_post,

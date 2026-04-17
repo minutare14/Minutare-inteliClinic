@@ -14,6 +14,11 @@ async def health() -> dict:
     return {"status": "ok", "service": "minutare-med"}
 
 
+@router.get("/health/live")
+async def health_live() -> dict:
+    return {"status": "ok", "service": "minutare-med", "kind": "liveness"}
+
+
 @router.get("/health/db")
 async def health_db(session: AsyncSession = Depends(get_session)) -> dict:
     try:
@@ -22,3 +27,23 @@ async def health_db(session: AsyncSession = Depends(get_session)) -> dict:
         return {"status": "ok", "database": "connected"}
     except Exception as e:
         return {"status": "error", "database": str(e)}
+
+
+@router.get("/health/ready")
+async def health_ready(session: AsyncSession = Depends(get_session)) -> dict:
+    try:
+        result = await session.execute(text("SELECT 1"))
+        result.scalar()
+        return {
+            "status": "ok",
+            "service": "minutare-med",
+            "kind": "readiness",
+            "database": "connected",
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "service": "minutare-med",
+            "kind": "readiness",
+            "database": str(e),
+        }

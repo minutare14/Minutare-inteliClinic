@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.observability.langsmith import trace_step
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +46,40 @@ async def call_llm(
     """
     provider = _resolve_provider()
 
-    if provider == "groq":
-        return await _call_groq(messages, temperature, max_tokens, json_mode)
-    elif provider == "openai":
-        return await _call_openai(messages, temperature, max_tokens, json_mode)
-    elif provider == "anthropic":
-        return await _call_anthropic(messages, temperature, max_tokens)
-    elif provider == "gemini":
-        return await _call_gemini(messages, temperature, max_tokens, json_mode)
-    else:
-        logger.warning("No LLM provider configured — returning None")
-        return None
+    async with trace_step(
+        "llm_call",
+        run_type="llm",
+        inputs={
+            "provider": provider or "none",
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "json_mode": json_mode,
+            "message_count": len(messages),
+        },
+        tags=["llm_call", provider or "no_provider"],
+    ) as run:
+        if provider == "groq":
+            result = await _call_groq(messages, temperature, max_tokens, json_mode)
+        elif provider == "openai":
+            result = await _call_openai(messages, temperature, max_tokens, json_mode)
+        elif provider == "anthropic":
+            result = await _call_anthropic(messages, temperature, max_tokens)
+        elif provider == "gemini":
+            result = await _call_gemini(messages, temperature, max_tokens, json_mode)
+        else:
+            logger.warning("No LLM provider configured — returning None")
+            result = None
+
+        if run is not None:
+            metrics = (result or {}).get("metrics") or {}
+            run.end(
+                outputs={
+                    "response_length": len((result or {}).get("content") or ""),
+                    "latency_s": round(float(metrics.get("latency_s", 0.0)), 3),
+                    "has_parsed": bool((result or {}).get("parsed")),
+                }
+            )
+        return result
 
 
 def _resolve_provider() -> str | None:

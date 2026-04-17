@@ -215,7 +215,7 @@ def generate_slots(professional_ids: list[uuid.UUID]) -> list[dict]:
 
 # ── DB mode ───────────────────────────────────────────────────
 
-async def seed_db(database_url: str) -> None:
+async def seed_db(database_url: str, *, skip_embeddings: bool = False) -> None:
     """Seed directly to database."""
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
@@ -297,6 +297,7 @@ async def seed_db(database_url: str) -> None:
                 title=doc_data["title"],
                 content=doc_data["content"],
                 category=doc_data["category"],
+                skip_embeddings=skip_embeddings,
             )
             print(
                 "  + {title} -> chunks={chunks} embedded={embedded} failed={failed}".format(
@@ -366,6 +367,11 @@ def main() -> None:
     )
     parser.add_argument("--api-url", default="http://localhost:8000", help="API base URL")
     parser.add_argument(
+        "--skip-embeddings",
+        action="store_true",
+        help="Seed RAG documents without generating embeddings during startup.",
+    )
+    parser.add_argument(
         "--database-url",
         default=os.environ.get("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/inteliclinic"),
         help="Database URL (for --mode db). Defaults to DATABASE_URL env var.",
@@ -375,7 +381,7 @@ def main() -> None:
     print(f"Seeding data (mode: {args.mode})")
 
     if args.mode == "db":
-        asyncio.run(seed_db(args.database_url))
+        asyncio.run(seed_db(args.database_url, skip_embeddings=args.skip_embeddings))
     else:
         seed_api(args.api_url)
 

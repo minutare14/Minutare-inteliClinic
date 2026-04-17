@@ -593,6 +593,8 @@ class RagService:
         content: str,
         category: str = "general",
         source_path: str | None = None,
+        *,
+        skip_embeddings: bool = False,
     ) -> RagIngestResponse:
         """
         Ingest a document with the full pipeline:
@@ -608,7 +610,7 @@ class RagService:
         embedded_count = 0
         failed_count = 0
         embedding_config = await self._resolve_embedding_config()
-        config_error = self._embedding_config_error(embedding_config)
+        config_error = "embedding_skipped_on_ingest" if skip_embeddings else self._embedding_config_error(embedding_config)
 
         for idx, chunk_content in enumerate(chunks):
             embedding: list[float] | None = None
@@ -616,7 +618,10 @@ class RagService:
             error: str | None = None
 
             try:
-                if config_error:
+                if skip_embeddings:
+                    chunk_status = "skipped"
+                    error = config_error
+                elif config_error:
                     failed_count += 1
                     error = config_error
                 else:
@@ -662,7 +667,7 @@ class RagService:
 
         logger.info(
             "[RAG:ingest] document_id=%s title=%s chunks_total=%d chunks_embedded=%d "
-            "chunks_failed=%d embedding_provider=%s embedding_model=%s config_source=%s",
+            "chunks_failed=%d embedding_provider=%s embedding_model=%s config_source=%s skip_embeddings=%s",
             doc.id,
             title,
             len(chunks),
@@ -671,6 +676,7 @@ class RagService:
             embedding_config.provider,
             embedding_config.model,
             embedding_config.source,
+            str(skip_embeddings).lower(),
         )
 
         await self.audit.log_event(
@@ -688,6 +694,7 @@ class RagService:
                 "embedding_model": embedding_config.model,
                 "embedding_config_source": embedding_config.source,
                 "config_error": config_error,
+                "skip_embeddings": skip_embeddings,
             },
         )
 

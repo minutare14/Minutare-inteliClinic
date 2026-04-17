@@ -75,6 +75,12 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${COMPOSE_PROJECT_NAME:-minutare}-db-internal:5432/${POSTGRES_DB}
       QDRANT_URL: http://${COMPOSE_PROJECT_NAME:-minutare}-qdrant-internal:6333
       UVICORN_PORT: "8741"
+      BOOTSTRAP_SEED_ON_STARTUP: ${BOOTSTRAP_SEED_ON_STARTUP:-false}
+      BOOTSTRAP_SEED_WITH_EMBEDDINGS: ${BOOTSTRAP_SEED_WITH_EMBEDDINGS:-false}
+      BOOTSTRAP_REGISTER_TELEGRAM_WEBHOOK_ON_STARTUP: ${BOOTSTRAP_REGISTER_TELEGRAM_WEBHOOK_ON_STARTUP:-true}
+      LANGGRAPH_RUNTIME_ENABLED: ${LANGGRAPH_RUNTIME_ENABLED:-true}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-inteliclinic-runtime}
     networks:
       - internal
       - dokploy-network
@@ -86,11 +92,11 @@ services:
         # service_started evita bloquear o API se o Qdrant demorar.
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8741/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8741/health/live || exit 1"]
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 5
-      start_period: 90s
+      start_period: 150s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-api.rule=Host(`${API_DOMAIN}`)"

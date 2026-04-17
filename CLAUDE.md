@@ -7,6 +7,81 @@
 
 ## Historico de Alteracoes
 
+### 2026-04-17 - Step 2 - Fechamento do Pipeline LangGraph + LangSmith + Composer
+
+**O que foi concluido neste step:**
+
+- `Evidencia`: `orchestrator.py` agora passa `prompt_source` e `clinic_cfg` para `ResponseComposer.compose()`, corrigindo lacuna que deixava esses parametros sem efeito no grafo documental.
+- `Evidencia`: `orchestrator.py` propaga todos os campos LangGraph do `ComposedResponse` para `ConversationState` — `langgraph_used`, `document_grading_*`, `query_rewrite_*`, `retrieval_attempts`, `initial_candidate_count`, `final_candidate_count`, `selected_chunks`, `composer_audit_payload`.
+- `Evidencia`: `orchestrator._audit()` agora inclui todos os campos do pipeline documental no log estruturado persistido — antes somente reranker era logado; agora o trace completo do grafo vai para `audit_events`.
+- `Evidencia`: `llm_client.call_llm()` agora wrapping com `trace_step("llm_call", run_type="llm")` — todo chamado LLM fica visivel no LangSmith quando `LANGSMITH_TRACING=true` e `LANGSMITH_API_KEY` configurada, sem quebrar o runtime quando nao configurada.
+- `Evidencia`: todos os 5 arquivos modificados validados com `ast.parse()` sem erros de sintaxe.
+
+**Runtime do pipeline documental (fechado):**
+1. `load_runtime_context` — carrega prompts do PromptRegistry ou defaults
+2. `decision_router` — roteia por intent
+3. `structured_data_lookup` / `schedule_flow` / `handoff_flow` / `clarification_flow` — fluxos diretos
+4. `rag_retrieval` — busca vetorial ou textual via pgvector
+5. `document_grading` — heuristico + opcional LLM (se prompt ativo no PromptRegistry)
+6. `query_rewrite` / `retry_retrieval` — rewrite deterministico + opcional LLM, ate max_retries
+7. `reranker` — cross-encoder multilingual (lazy, noop se desabilitado)
+8. `response_composer` — gera resposta final via LLM ou template
+9. `persist_and_audit` — payload completo logado estruturado
+
+**Tracing LangSmith (funcionando quando env presente):**
+- `trace_step` usado em todos os nodes do grafo documental
+- `call_llm` instrumentado com span `llm_call` (provider, latencia, tamanho da resposta)
+- Fallback silencioso quando LangSmith nao esta configurado — runtime saudavel sem env
+
+**Impacto no deploy:**
+- `Evidencia`: sem alteracao no caminho critico do boot — lazy load de embeddings preservado
+- `Evidencia`: `LANGSMITH_TRACING=false` por padrao — nao afeta deploy sem configuracao LangSmith
+- `Evidencia`: `LANGGRAPH_RUNTIME_ENABLED=true` por padrao — grafo ativo; fallback linear disponivel se LangGraph nao instalado
+
+**Pendencias:**
+- `Plano`: validar boot real do compose assim que houver engine Docker acessivel
+- `Plano`: testes unitarios para `document_runtime_graph.py` e `response_composer.py`
+
+### 2026-04-17 - Step 1 - Estabilizacao do Bootstrap de Deploy
+
+**Deploy / causa raiz (evidencia):**
+- `Evidencia`: `apps/api/entrypoint.sh` rodava `alembic -> seed_data.py -> register_telegram_webhook.py -> uvicorn` antes de expor HTTP.
+- `Evidencia`: `scripts/seed_data.py` chamava `RagService.ingest_document()` no startup.
+- `Evidencia`: `RagService.ingest_document()` tentava gerar embeddings no ingest; com `EMBEDDING_PROVIDER=local`, isso entra no caminho de `sentence-transformers` e carrega modelo local antes da API responder.
+- `Inferencia`: o container podia ficar `unhealthy` mesmo com `/health` leve porque o processo demorava para chegar ao `uvicorn`, deixando o healthcheck sem endpoint HTTP ativo dentro da janela do compose.
+
+**O que foi feito neste step:**
+- `Evidencia`: `apps/api/entrypoint.sh` reescrito para bootstrap limpo com logs por etapa, sem `set -x`, com tempos medidos e seed/webhook opcionais por env.
+- `Evidencia`: adicionadas flags reais de startup em `apps/api/app/core/config.py`:
+  - `BOOTSTRAP_SEED_ON_STARTUP`
+  - `BOOTSTRAP_SEED_WITH_EMBEDDINGS`
+  - `BOOTSTRAP_REGISTER_TELEGRAM_WEBHOOK_ON_STARTUP`
+- `Evidencia`: `scripts/seed_data.py` agora aceita `--skip-embeddings`.
+- `Evidencia`: `RagService.ingest_document()` agora aceita `skip_embeddings=True`, permitindo seed documental sem carregar modelo local no boot.
+- `Evidencia`: adicionados endpoints `/health/live` e `/health/ready` em `apps/api/app/api/routes/health.py`.
+- `Evidencia`: `docker-compose.yml` passou a usar `/health/live`, `timeout` maior e `start_period` maior, com defaults seguros para bootstrap.
+- `Evidencia`: `apps/api/Dockerfile` passou a instalar `torch` via indice CPU-only antes de `sentence-transformers`, reduzindo risco de stack CUDA desnecessaria no deploy Linux.
+- `Evidencia`: `docker compose config` executado com sucesso apos as mudancas, validando sintaxe do compose com as novas envs/defaults.
+
+**Runtime real / impacto:**
+- `Evidencia`: o boot critico da API deixa de depender de seed com embeddings por default.
+- `Evidencia`: o healthcheck passa a medir liveness HTTP real, separado de readiness com banco.
+- `Inferencia`: isso reduz risco de timeout de startup, modelo carregado cedo demais e falha em VPS comum.
+
+**Decisao arquitetural:**
+- `Evidencia`: embeddings e reranker continuam lazy/on-demand; nao entram mais no caminho critico do deploy.
+- `Evidencia`: seed de demo passa a ser comportamento opt-in, nao requisito implicito do boot.
+
+**Riscos / limitacoes / pendencias:**
+- `Evidencia`: sem daemon Docker local ativo nesta thread, ainda nao foi possivel executar `docker compose up -d --build` e observar container health em runtime real local.
+- `Plano`: validar boot real do compose assim que houver engine Docker acessivel ou no proximo ambiente de deploy.
+- `Plano`: integrar LangGraph real ao fluxo documental/roteamento, com LangSmith, grading, rewrite e retry controlado.
+
+**Impacto em atendimento / RAG / LangGraph / LangSmith:**
+- `Evidencia`: seed documental pode existir sem embeddings iniciais; o runtime preserva fallback textual do RAG.
+- `Inferencia`: isso melhora deploy sem remover a possibilidade de reindex posterior ou reranker lazy.
+- `Plano`: proximos steps vao ligar esse runtime a um subgrafo LangGraph real com observabilidade LangSmith.
+
 ### 2026-04-15 — Integridade Operacional & Visualização de Pipeline (Stage 8 & 9)
 
 **Integridade Operacional & Reconciliação (Stage 8):**

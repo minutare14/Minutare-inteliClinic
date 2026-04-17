@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.logging import setup_logging
+from app.observability.langsmith import configure_langsmith
 
 # Import all models so SQLModel metadata is populated
 import app.models.patient  # noqa: F401
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    configure_langsmith()
     logger.info("IntelliClinic API starting (env=%s)", settings.app_env)
 
     provider = settings.llm_provider or "auto-detect"

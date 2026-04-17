@@ -1,63 +1,107 @@
 #!/bin/sh
-# entrypoint.sh — API startup sequence for production
-# Runs migrations → seed → API server
-set -e
-set -x  # Habilita modo verbose para logs extremos no Dokploy
+# entrypoint.sh - API startup sequence for production
+# Runs connectivity check -> migrations -> optional seed -> optional webhook -> API server
+set -eu
 
-echo "======================================================"
-echo "  IntelliClinic — API Starting"
-echo "  ENV: ${APP_ENV:-production}"
-echo "======================================================"
+timestamp() {
+    date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+log() {
+    echo "[$(timestamp)] $*"
+}
+
+bool_true() {
+    case "$(printf '%s' "${1:-false}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+log "======================================================"
+log "IntelliClinic API starting"
+log "ENV=${APP_ENV:-production}"
+log "======================================================"
 
 # Sanitize variables just in case Dokploy env injected CRLF (\r)
 export UVICORN_PORT=$(echo "${UVICORN_PORT:-8741}" | tr -d '\r')
 export UVICORN_WORKERS=$(echo "${UVICORN_WORKERS:-1}" | tr -d '\r')
-export DATABASE_URL=$(echo "${DATABASE_URL}" | tr -d '\r')
+export DATABASE_URL=$(echo "${DATABASE_URL:-}" | tr -d '\r')
+export BOOTSTRAP_SEED_ON_STARTUP=$(echo "${BOOTSTRAP_SEED_ON_STARTUP:-false}" | tr -d '\r')
+export BOOTSTRAP_SEED_WITH_EMBEDDINGS=$(echo "${BOOTSTRAP_SEED_WITH_EMBEDDINGS:-false}" | tr -d '\r')
+export BOOTSTRAP_REGISTER_TELEGRAM_WEBHOOK_ON_STARTUP=$(echo "${BOOTSTRAP_REGISTER_TELEGRAM_WEBHOOK_ON_STARTUP:-true}" | tr -d '\r')
 
-echo "--> Checking database connectivity..."
+startup_started_at=$(date +%s)
+
+log "--> Checking database connectivity"
 python - <<'PYEOF'
-import asyncio, os, sys
-from sqlalchemy.ext.asyncio import create_async_engine
+import asyncio
+import os
+import sys
+
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
 
 async def check():
     url = os.environ.get("DATABASE_URL", "")
     if not url:
         print("ERROR: DATABASE_URL not set", file=sys.stderr)
         sys.exit(1)
+
     engine = create_async_engine(url, pool_pre_ping=True)
-    for attempt in range(30):
-        try:
-            async with engine.connect() as conn:
-                await conn.execute(text("SELECT 1"))
-            await engine.dispose()
-            print(f"    DB ready (attempt {attempt + 1})")
-            return
-        except Exception as e:
-            print(f"    Waiting for DB... ({attempt + 1}/30): {e}")
-            await asyncio.sleep(2)
-    print("ERROR: DB not available after 60s", file=sys.stderr)
-    await engine.dispose()
-    sys.exit(1)
+    try:
+        for attempt in range(30):
+            try:
+                async with engine.connect() as conn:
+                    await conn.execute(text("SELECT 1"))
+                print(f"DB ready (attempt {attempt + 1})")
+                return
+            except Exception as exc:  # pragma: no cover - startup diagnostics only
+                print(f"Waiting for DB... ({attempt + 1}/30): {exc}")
+                await asyncio.sleep(2)
+        print("ERROR: DB not available after 60s", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        await engine.dispose()
+
 
 asyncio.run(check())
 PYEOF
 
-echo "--> Running database migrations..."
-alembic upgrade head || { echo "CRITICAL ERROR: Alembic failed"; exit 1; }
-echo "    Migrations complete."
+migration_started_at=$(date +%s)
+log "--> Running database migrations"
+alembic upgrade head
+log "--> Migrations complete in $(( $(date +%s) - migration_started_at ))s"
 
-echo "--> Seeding initial data..."
-python scripts/seed_data.py \
-    --mode db \
-    --database-url "${DATABASE_URL}" \
-    || echo "    Seed failed or partially applied (non-fatal, continuing)."
+if bool_true "${BOOTSTRAP_SEED_ON_STARTUP}"; then
+    seed_started_at=$(date +%s)
+    log "--> Seeding initial data"
+    if bool_true "${BOOTSTRAP_SEED_WITH_EMBEDDINGS}"; then
+        python scripts/seed_data.py --mode db --database-url "${DATABASE_URL}" \
+            || log "Seed failed or partially applied (non-fatal, continuing)"
+    else
+        python scripts/seed_data.py --mode db --skip-embeddings --database-url "${DATABASE_URL}" \
+            || log "Seed failed or partially applied (non-fatal, continuing)"
+    fi
+    log "--> Seed step finished in $(( $(date +%s) - seed_started_at ))s"
+else
+    log "--> Skipping startup seed (BOOTSTRAP_SEED_ON_STARTUP=false)"
+fi
 
-echo "--> Registrando webhook do Telegram (se habilitado)..."
-python scripts/register_telegram_webhook.py || echo "    Webhook falhou (não-fatal)."
+if bool_true "${BOOTSTRAP_REGISTER_TELEGRAM_WEBHOOK_ON_STARTUP}"; then
+    webhook_started_at=$(date +%s)
+    log "--> Registering Telegram webhook (if configured)"
+    python scripts/register_telegram_webhook.py \
+        || log "Webhook registration failed (non-fatal)"
+    log "--> Webhook bootstrap finished in $(( $(date +%s) - webhook_started_at ))s"
+else
+    log "--> Skipping Telegram webhook bootstrap"
+fi
 
-echo "--> Starting Uvicorn..."
-# Garantir log level exato para evitar Invalid choice do framework
+log "--> Startup bootstrap finished in $(( $(date +%s) - startup_started_at ))s"
+log "--> Starting Uvicorn"
+
 LOG_LEVEL_LOWER=$(echo "${APP_LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]' | tr -d '\r')
 
 exec uvicorn app.main:app \
@@ -66,4 +110,3 @@ exec uvicorn app.main:app \
     --workers "${UVICORN_WORKERS}" \
     --log-level "${LOG_LEVEL_LOWER}" \
     --no-access-log
-

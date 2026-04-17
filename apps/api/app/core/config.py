@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     # ── Database ──────────────────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/inteliclinic"
+    bootstrap_seed_on_startup: bool = False
+    bootstrap_seed_with_embeddings: bool = False
+    bootstrap_register_telegram_webhook_on_startup: bool = True
 
     # ── Telegram ──────────────────────────────────────────────────────────────
     telegram_bot_token: str = ""
@@ -77,6 +80,13 @@ class Settings(BaseSettings):
     rag_top_k: int = 5
     rag_chunk_size: int = 500
     rag_chunk_overlap: int = 100
+    rag_document_grading_enabled: bool = True
+    rag_document_grading_min_score: float = 0.58
+    rag_document_grading_min_approved_chunks: int = 1
+    rag_query_rewrite_enabled: bool = True
+    rag_query_rewrite_max_retries: int = 1
+    rag_query_rewrite_model: str = ""
+    rag_query_rewrite_temperature: float = 0.0
 
     # ── RAG Reranker ──────────────────────────────────────────────────────────
     # Two-stage retrieval: pgvector (top_k_initial) → cross-encoder → LLM (top_k_final)
@@ -93,6 +103,12 @@ class Settings(BaseSettings):
     rag_reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
     rag_reranker_top_k_initial: int = 20   # candidates retrieved from pgvector
     rag_reranker_top_k_final: int = 5      # chunks sent to LLM after reranking
+    langgraph_runtime_enabled: bool = True
+    langsmith_tracing: bool = False
+    langsmith_api_key: str = ""
+    langsmith_project: str = "inteliclinic-runtime"
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_workspace_id: str = ""
 
     # ── Auth / JWT ────────────────────────────────────────────────────────────
     # JWT secret — MUST be set to a strong random value in production.
@@ -119,6 +135,10 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.app_env == "development"
+
+    @property
+    def langsmith_enabled(self) -> bool:
+        return self.langsmith_tracing and bool(self.langsmith_api_key)
 
 
 settings = Settings()
