@@ -174,7 +174,9 @@ class CrmService:
     ) -> list[FollowUp]:
         q = select(FollowUp).where(FollowUp.completed == False)  # noqa: E712
         if due_before:
-            q = q.where(FollowUp.scheduled_at <= due_before)
+            # Strip tzinfo so it can compare with TIMESTAMP WITHOUT TIME ZONE columns
+            effective = due_before if due_before.tzinfo is None else due_before.replace(tzinfo=None)
+            q = q.where(FollowUp.scheduled_at <= effective)
         q = q.order_by(FollowUp.scheduled_at).limit(limit)
         result = await self.session.execute(q)
         return result.scalars().all()

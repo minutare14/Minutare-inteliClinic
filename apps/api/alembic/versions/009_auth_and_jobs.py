@@ -37,6 +37,8 @@ def upgrade() -> None:
     op.create_index("ix_users_email", "users", ["email"])
 
     # ── follow_ups ────────────────────────────────────────────────────────────
+    # Note: indexes for patient_id and the composite index are created inline
+    # via index=True on the column. Additional indexes added below.
     op.create_table(
         "follow_ups",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -50,12 +52,13 @@ def upgrade() -> None:
         sa.Column("created_by", sa.String(128), nullable=False, server_default="system"),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
     )
-    op.create_index("ix_follow_ups_patient_id", "follow_ups", ["patient_id"])
-    op.create_index("ix_follow_ups_scheduled_at", "follow_ups", ["scheduled_at"])
+    # Additional indexes not covered by column-level index=True
+    op.create_index("ix_follow_ups_scheduled_at", "follow_ups", ["scheduled_at"], if_not_exists=True)
     op.create_index(
         "ix_follow_ups_pending",
         "follow_ups",
         ["scheduled_at", "completed"],
+        if_not_exists=True,
     )
 
     # ── alerts ────────────────────────────────────────────────────────────────
@@ -71,8 +74,8 @@ def upgrade() -> None:
         sa.Column("resolved_at", sa.DateTime(), nullable=True),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
     )
-    op.create_index("ix_alerts_patient_id", "alerts", ["patient_id"])
-    op.create_index("ix_alerts_open", "alerts", ["resolved", "created_at"])
+    # Additional indexes not covered by column-level index=True
+    op.create_index("ix_alerts_open", "alerts", ["resolved", "created_at"], if_not_exists=True)
 
 
 def downgrade() -> None:

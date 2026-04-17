@@ -30,7 +30,7 @@ _POLL_INTERVAL: int = getattr(settings, "followup_worker_interval_seconds", 300)
 
 async def _process_overdue() -> None:
     """Check for overdue follow-ups and escalate each one to an alert."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     async with async_session_factory() as session:
         svc = CrmService(session)
