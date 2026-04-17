@@ -8,6 +8,31 @@
 
 ## Historico de Alteracoes
 
+### 2026-04-17 - Correcao do Bug de Auth + Admin via Env Vars
+
+**Bug reportado:** Login com `emanoelmcedo@gmail.com` falhava com "E-mail ou senha incorretos".
+
+**Causa raiz 1 (Dokploy):** `.env` no servidor VPS tinha `DOCKER_CONFIG=/root/.dockerADMIN_SYNC=true` — duas variaveis concatenadas na mesma linha sem separador. Pydantic_settings leu como uma unica variavel `DOCKER_CONFIG=/root/.dockerADMIN_SYNC=true`. `ADMIN_SYNC` nunca era definido.
+
+**Causa raiz 2 (local):** `seed_default_admin()` usava SQLAlchemy ORM com `UserRole.admin.value` — PostgreSQL tentava converter para tipo enum `userrole` que nao existe na base, gerando `UndefinedObjectError`. Função была envolta em try/except silencioso que logava "FALHA" sem expor o erro real.
+
+**Correcao 1 (VPS):** Adicionada linha separada `ADMIN_SYNC=true` no `.env` da VPS. Container recreation necessaria para Docker recolher a variavel.
+
+**Correcao 2 (codigo):** `seed_default_admin()` reescrito com raw SQL via `text()` para ignorar o tipo enum. Logica: verifica se email configurado existe na DB → se admin, sincroniza senha; se diferente email e `ADMIN_SYNC=true`, deleta admin antigo e cria novo.
+
+**Observacao:** `admin_sync` nao estava no container em execucao porque a imagem Docker была buildada ANTES da adicao do campo em `config.py`. O container so le `admin_sync` corretamente apos rebuild da imagem.
+
+**Estado atual:**
+- Login funciona: `emanoelmcedo@gmail.com` / `Asd142000`
+- `ADMIN_SYNC=true` registrado no .env da VPS
+- `seed_default_admin()` reescrito com raw SQL
+
+**Arquivos alterados:**
+- `apps/api/app/core/auth.py` — rewrite completo do seed com raw SQL
+- `apps/api/app/core/config.py` — campo `admin_sync` adicionado
+
+**Nota para deploy futuro:** Após mudar `ADMIN_DEFAULT_EMAIL` ou adicionar `ADMIN_SYNC=true` no .env, é necessário rebuild da imagem Docker para que o campo `admin_sync` funcione (pydantic_settings lê do binario, não do .env em runtime para campos novos).
+
 ### 2026-04-17 - Step 3 - Analise Real do AIAnytime/LangGraph-Agentic-RAG
 
 **Fonte:** codigo lido diretamente de raw.githubusercontent.com — arquivos `nodes.py`, `edges.py`, `graph.py`, `retriever.py`, `main.py`.
