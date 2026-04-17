@@ -57,7 +57,7 @@ RUN chmod +x ./entrypoint.sh
 
 EXPOSE 8741
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=5 \
-    CMD curl -sf http://127.0.0.1:8741/health/live || exit 1
+HEALTHCHECK --interval=15s --timeout=10s --start-period=300s --retries=5 \
+    CMD curl -sf --max-time 8 http://127.0.0.1:8741/health/live || exit 1
 
 ENTRYPOINT ["./entrypoint.sh"]

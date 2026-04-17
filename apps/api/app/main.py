@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import time as _time
+    _t_start = _time.monotonic()
+
     setup_logging()
     configure_langsmith()
     logger.info("IntelliClinic API starting (env=%s)", settings.app_env)
@@ -45,26 +48,36 @@ async def lifespan(app: FastAPI):
         logger.info("SQLite tables created (dev mode)")
 
     # ── Seed ClinicSettings (get_or_create) ───────────────────────────────────
+    _t0 = _time.monotonic()
     try:
         from app.core.db import async_session_factory
         from app.services.admin_service import AdminService
         async with async_session_factory() as session:
             admin_svc = AdminService(session)
-            clinic_cfg = await admin_svc.get_clinic_settings()
+            clinic_cfg = await asyncio.wait_for(
+                admin_svc.get_clinic_settings(), timeout=15.0
+            )
             logger.info(
-                "[STARTUP] ClinicSettings OK — clinic='%s' bot='%s'",
+                "[STARTUP] ClinicSettings OK (%.1fs) — clinic='%s' bot='%s'",
+                _time.monotonic() - _t0,
                 clinic_cfg.name or settings.clinic_name or "(vazio)",
                 clinic_cfg.chatbot_name or settings.clinic_chatbot_name or "(vazio)",
             )
+    except asyncio.TimeoutError:
+        logger.error("[STARTUP] ClinicSettings timeout (>15s) — continuando sem config do banco")
     except Exception:
         logger.exception("[STARTUP] Falha ao seed ClinicSettings — continuando")
 
     # ── Seed default admin user (once, on first deploy) ───────────────────────
+    _t0 = _time.monotonic()
     try:
         from app.core.db import async_session_factory
         from app.core.auth import seed_default_admin
         async with async_session_factory() as session:
-            await seed_default_admin(session)
+            await asyncio.wait_for(seed_default_admin(session), timeout=15.0)
+        logger.info("[STARTUP] Admin seed OK (%.1fs)", _time.monotonic() - _t0)
+    except asyncio.TimeoutError:
+        logger.error("[STARTUP] Admin seed timeout (>15s) — continuando")
     except Exception:
         logger.exception("[STARTUP] Falha ao seed admin user — continuando")
 
@@ -72,7 +85,10 @@ async def lifespan(app: FastAPI):
     from app.workers.followup_worker import run_followup_worker
     worker_task = asyncio.create_task(run_followup_worker(), name="followup_worker")
 
-    logger.info("API Startup completo. Aguardando conexões.")
+    logger.info(
+        "API Startup completo em %.1fs. Aguardando conexões.",
+        _time.monotonic() - _t_start,
+    )
     yield
 
     # Graceful shutdown — cancel the background worker

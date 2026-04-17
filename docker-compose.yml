@@ -92,11 +92,11 @@ services:
         # service_started evita bloquear o API se o Qdrant demorar.
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8741/health/live || exit 1"]
+      test: ["CMD-SHELL", "curl -sf --max-time 8 http://127.0.0.1:8741/health/live || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 150s
+      start_period: 300s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-minutare}-api.rule=Host(`${API_DOMAIN}`)"

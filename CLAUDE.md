@@ -13,9 +13,11 @@
 **Fonte:** codigo lido diretamente de raw.githubusercontent.com — arquivos `nodes.py`, `edges.py`, `graph.py`, `retriever.py`, `main.py`.
 
 **GraphState confirmado no codigo:**
+
 - `Evidencia`: `GraphState` tem apenas `messages: Annotated[list, add_messages]` — um unico campo. Sem `question`, `documents`, `attempts`, `clinic_id`, `grade_score`. Estado circula serializado como lista de mensagens.
 
 **Nodes confirmados:**
+
 - `Evidencia`: `agent` — LLM com tools bound; decide se chama `retrieve_documents` via `tool_calls`
 - `Evidencia`: `retrieve` — `ToolNode(tools)`; executa FAISS
 - `Evidencia`: `rewrite` — LLM reescreve `messages[0].content` (primeira mensagem hardcoded)
@@ -23,11 +25,13 @@
 - `Evidencia`: `grade_documents` NAO e um node — e uma funcao de edge condicional
 
 **Edges confirmadas:**
+
 - `Evidencia`: `route_after_agent` — se `last_message.tool_calls` existe → `retrieve`; senao → `END`
 - `Evidencia`: `grade_documents` — LLM com `structured_output(GradeDocuments)` avalia `last_message.content[:500]`; retorna `binary_score: "yes"/"no"`; "yes" → `generate`, "no" → `rewrite`
 - `Evidencia`: `rewrite → agent` — edge fixa, sem limite de tentativas; loop potencialmente infinito confirmado
 
 **Problemas confirmados no codigo:**
+
 - `Evidencia`: sem `max_retries` em nenhum arquivo — loop `rewrite → agent → retrieve → grade → rewrite` e infinito
 - `Evidencia`: grading avalia truncamento de 500 chars da ultima mensagem — nao por chunk individual
 - `Evidencia`: contexto extraido por `if "Document" in msg.content` — se string nao bater, `context = ""` e LLM gera sem contexto
@@ -36,11 +40,13 @@
 - `Evidencia`: observabilidade via `print()` com emojis — sem logger, sem trace estruturado
 
 **O que vale absorver (padrao, nao codigo):**
+
 - `Evidencia`: separacao `nodes.py / edges.py / graph.py` e arquiteturalmente correta
 - `Evidencia`: grading como gate condicional antes de gerar e o padrao correto
 - `Evidencia`: `GradeDocuments(BaseModel)` com `binary_score` e `reasoning` via `with_structured_output` e pratica valida
 
 **O que NAO sera aproveitado:**
+
 - `Evidencia`: FAISS — pgvector permanece
 - `Evidencia`: state como lista de mensagens — IntelliClinic usa `DocumentGraphState` com 30+ campos tipados
 - `Evidencia`: retrieval via decisao do LLM — IntelliClinic chama retrieval deterministicamente
@@ -48,6 +54,7 @@
 - `Evidencia`: grading em string truncada — IntelliClinic grada por chunk com score numerico heuristico
 
 **Impacto arquitetural no IntelliClinic:**
+
 - `Evidencia`: todos os padroes validos do repo ja estao implementados em `document_runtime_graph.py` com qualidade superior
 - `Inferencia`: o repo confirma que o padrao de grafo com grading condicional e a direcao certa — nao e overengineering
 - `Evidencia`: o IntelliClinic supera o repo em: estado tipado, retry controlado, grading heuristico, retrieval deterministico, audit log, governanca por clinica, structured lookup prioritario
@@ -367,7 +374,7 @@ Quero análise do código real do repo.
 ## O que esta so em plano
 
 - `Plano`: GraphRAG.
-- `Plano`: Google Calendar / Google integrations.
+- `Plano`: Google Calendar / Gogle integrations.
 - `Plano`: WhatsApp e voz/LiveKit.
 - `Plano`: RBAC/JWT.
 - `Plano`: follow-up, CRM e leads.
