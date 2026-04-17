@@ -120,6 +120,9 @@ class Settings(BaseSettings):
     # Default admin user seeded on first startup (change via Admin UI after login)
     admin_default_email: str = "admin@clinic.local"
     admin_default_password: str = "change-me-on-first-login"
+    # When true, forces re-sync of admin email/password on every startup.
+    # Use to replace an existing admin with new credentials from the env.
+    admin_sync: bool = False
 
     # ── Google Calendar OAuth2 ─────────────────────────────────────────────────
     # Obtain from Google Cloud Console → APIs & Services → Credentials
