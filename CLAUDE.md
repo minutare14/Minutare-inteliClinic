@@ -98,33 +98,30 @@
 - `Plano`: validar boot real do compose assim que houver engine Docker acessivel
 - `Plano`: testes unitarios para `document_runtime_graph.py` e `response_composer.py`
 
-Sua resposta não conta como análise real do repositório.
+### 2026-04-17 - Step 4 - Correcao do Unhealthy de Deploy (lifespan timeout)
 
-Você mesmo disse que não tinha acesso à URL e que respondeu com base em conhecimento de treinamento. Então:
+**Causa raiz identificada por auditoria de codigo (evidencia):**
 
-- nodes
-- edges
-- GraphState
-- fluxo exato
-- arquivos reais
-- limitações específicas do repo
+- `Evidencia`: `apps/api/app/main.py` lifespan executava `admin_svc.get_clinic_settings()` e `seed_default_admin()` sem nenhum timeout — se a conexao com o banco fosse lenta no boot, o `yield` nunca chegava, o uvicorn nunca recebia conexoes, e o healthcheck sempre falhava.
+- `Evidencia`: `docker-compose.yml` usava `start_period: 150s` e `curl -sf` sem `--max-time` — curl podia bloquear ate o timeout do OS (padrão ilimitado), consumindo toda a janela de start_period com uma unica verificacao travada.
+- `Evidencia`: `Dockerfile HEALTHCHECK` usava `start_period=120s` — abaixo dos 150s do compose e muito abaixo do tempo real de boot (Python heavy packages + DB seed).
+- `Inferencia`: soma de `sentence-transformers` + `langgraph` + `langchain-core` + `langsmith` na importacao (~10-30s em VPS fria) + webhook Telegram (~30s) + seed DB sem timeout = ultrapassagem sistematica da janela de health.
 
-não podem ser tratados como fatos confirmados.
+**O que foi corrigido neste step:**
 
-Quero que você corrija isso.
+- `Evidencia`: `apps/api/app/main.py`: ambas as operacoes DB agora usam `asyncio.wait_for(..., timeout=15.0)`. `asyncio.TimeoutError` capturado com log de erro; boot nao e mais bloqueado indefinidamente.
+- `Evidencia`: timing logs adicionados ao lifespan — `_time.monotonic()` marca inicio total, inicio de cada operacao DB, e log final mostra tempo total de startup em segundos.
+- `Evidencia`: `docker-compose.yml`: `start_period` aumentado de `150s` para `300s`; `curl --max-time 8` adicionado ao comando healthcheck.
+- `Evidencia`: `apps/api/Dockerfile`: `HEALTHCHECK start_period` aumentado de `120s` para `300s`; `--max-time 8` adicionado ao curl; `timeout` do HEALTHCHECK aumentado de `5s` para `10s`.
 
-Você deve:
+**Garantias pos-correcao:**
 
-1. acessar de fato o repositório
-2. ler os arquivos reais
-3. confirmar a estrutura concreta
-4. distinguir claramente:
-   - o que foi confirmado no código
-   - o que é inferência arquitetural
-5. refazer a análise com evidência real
+- `Evidencia`: lifespan nao bloqueia mais de 30s total nas operacoes DB (2x 15s timeout).
+- `Evidencia`: curl do healthcheck tem limite de 8s por verificacao — nao consome janela inteira em uma verificacao travada.
+- `Evidencia`: `start_period: 300s` absorve boot pesado de VPS fria + imports Python + seed + webhook.
+- `Inferencia`: risco de unhealthy por boot lento reduzido drasticamente sem alterar comportamento funcional da API.
 
-Não quero mais análise “de memória”.
-Quero análise do código real do repo.
+**Commit:** `fix(deploy): guard lifespan DB ops with timeout + raise start_period to 300s`
 
 ### 2026-04-17 - Step 1 - Estabilizacao do Bootstrap de Deploy
 
