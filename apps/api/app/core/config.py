@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     # ── Qdrant (reserved for future vector store migration) ───────────────────
     qdrant_url: str = "http://localhost:6333"
 
+    # ── Pinecone (primary vector store) ───────────────────────────────────────
+    pinecone_api_key: str = ""
+    pinecone_index: str = "inteliclinic-rag"
+    pinecone_cloud: str = "aws"   # aws | gcp | azure
+    pinecone_region: str = "us-east-1"
+
     # ── RAG ───────────────────────────────────────────────────────────────────
     rag_confidence_threshold: float = 0.75
     rag_top_k: int = 5
