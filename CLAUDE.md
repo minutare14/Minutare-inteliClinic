@@ -13,7 +13,7 @@ Memoria viva tecnica. Registrar descobertas reais com separacao `Evidencia`, `In
 - `1.3 CRITICA`: Rotas operacionais sem auth. Corrigido: `Depends(get_current_user)` em todos os 5 arquivos de rota.
 - `1.4 HIGH`: StructuredLookup sem cobertura precos/horarios. Corrigido: `_lookup_hours()` e `_lookup_prices()` async.
 - `1.5 HIGH`: Prompt usava profissionais hardcoded. Corrigido: `orchestrator._inject_professionals_into_context()` injeta profissionais reais via `faro_brief`.
-- `1.6 HIGH`: Deploy `api` unhealthy — alembic.ini usava URL hardcoded (`localhost`) e `-x` no entrypoint estava com sintaxe errada. Corrigido: `alembic.ini` usa `sqlalchemy.url = ${DATABASE_URL}` (var env), migrations idempotentes com `if_not_exists=True`.
+- `1.6 HIGH`: Deploy `api` unhealthy — stacktrace real: `ValueError: <class 'list'> has no matching SQLAlchemy type` em `rag.py` linha 37. Campo `entity_signatures` sem `sa_column` — SQLModel não consegue mapear `list[str]` para tipo SQL. Corrigido: `sa_column=Column(JSON)` em `entity_signatures`. Alembic URL e idempotência também corrigidos.
 
 **Fase 2 — Estabilizacao runtime:**
 - CLINIC_ID production guard: `model_validator` em `config.py` — falha se `APP_ENV=production` sem `CLINIC_ID`.

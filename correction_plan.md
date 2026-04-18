@@ -1164,11 +1164,34 @@ sqlalchemy.url = ${DATABASE_URL}
 
 O `-x` do commit anterior estava ERRADO — o Alembic usa `-x` para script variables, não para URL de banco.
 
+**Stacktrace real do container:**
+```
+File "/app/app/models/rag.py", line 37, in <module>
+class RagChunk(SQLModel, table=True):
+ValueError: <class 'list'> has no matching SQLAlchemy type
+```
+
+**Causa real: `entity_signatures` sem `sa_column`.**
+O campo `entity_signatures: list[str] | None = Field(default=None)` não define `sa_column`. SQLModel tenta inferir o tipo da coluna a partir de `list[str]`, mas `list` não tem mapeamento SQLAlchemy nativo. O `embedding` funciona porque usa `sa_column=Column(Vector(EMBEDDING_DIM))` explicitamente.
+
+**Fix em `apps/api/app/models/rag.py`:**
+```python
+# antes (quebra):
+entity_signatures: list[str] | None = Field(default=None)
+
+# depois (correto):
+entity_signatures: list[str] | None = Field(
+    default=None,
+    sa_column=Column(JSON),
+)
+```
+
 ### Arquivos alterados
 - `apps/api/alembic.ini` — `sqlalchemy.url = ${DATABASE_URL}`
 - `apps/api/entrypoint.sh` — `alembic upgrade head` (sem `-x`)
+- `apps/api/app/models/rag.py` — `entity_signatures` com `sa_column=Column(JSON)`
 
 ### Ações de acompanhamento
-- Commit `4c06aea` (idempotência) mantido — proteção contra migrations duplicadas
-- Commit `59ec773` (URL correta) — causa raiz real
-- Ambos necessários para deploy confiável
+- Commit `4c06aea` (idempotência) mantido
+- Commit `59ec773` (URL correta) mantido
+- Commit atual (models/rag.py) — causa raiz REAL do `unhealthy`

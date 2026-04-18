@@ -52,7 +52,10 @@ class RagChunk(SQLModel, table=True):
     )
     embedding_error: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     parent_chunk_id: uuid.UUID | None = Field(default=None, index=True)
-    entity_signatures: list[str] | None = Field(default=None)
+    entity_signatures: list[str] | None = Field(
+        default=None,
+        sa_column=Column(JSON),
+    )
     page: int | None = None
     metadata_json: str | None = None  # JSON string for extra metadata
     created_at: datetime = Field(default_factory=datetime.utcnow)
