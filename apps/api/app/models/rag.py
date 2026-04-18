@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime
+from typing import Annotated
 
 from sqlalchemy import Boolean, Column, JSON, Text
 from sqlmodel import Field, SQLModel
@@ -24,6 +25,7 @@ class RagDocument(SQLModel, table=True):
     __tablename__ = "rag_documents"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    clinic_id: str = Field(default="clinic01", max_length=64, index=True)
     title: str = Field(max_length=512)
     category: str = Field(default="general", max_length=64)
     source_path: str | None = Field(default=None, max_length=1024)
@@ -37,6 +39,7 @@ class RagChunk(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     document_id: uuid.UUID = Field(foreign_key="rag_documents.id", index=True)
+    clinic_id: str = Field(default="clinic01", max_length=64, index=True)  # denormalized from RagDocument for fast filtering
     chunk_index: int = Field(default=0)
     content: str = Field(sa_column=Column(Text, nullable=False))
     embedding: list[float] | None = Field(
@@ -48,6 +51,8 @@ class RagChunk(SQLModel, table=True):
         sa_column=Column(Boolean, nullable=False, default=False),
     )
     embedding_error: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    parent_chunk_id: uuid.UUID | None = Field(default=None, index=True)
+    entity_signatures: list[str] | None = Field(default=None)
     page: int | None = None
     metadata_json: str | None = None  # JSON string for extra metadata
     created_at: datetime = Field(default_factory=datetime.utcnow)

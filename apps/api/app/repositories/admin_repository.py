@@ -124,15 +124,26 @@ class AdminRepository:
         await self.session.refresh(obj)
         return obj
 
-    async def get_active_prompt(self, clinic_id: str, agent: str) -> PromptRegistry | None:
-        """Return the active prompt for a given agent, or None if not found."""
-        result = await self.session.execute(
-            select(PromptRegistry).where(
-                PromptRegistry.clinic_id == clinic_id,
-                PromptRegistry.agent == agent,
-                PromptRegistry.active == True,  # noqa: E712
-            ).order_by(PromptRegistry.version.desc()).limit(1)
+    async def get_active_prompt(
+        self, clinic_id: str, agent: str, prompt_type: str | None = None
+    ) -> PromptRegistry | None:
+        """Return the active prompt matching agent or prompt_type, or None if not found.
+
+        prompt_type takes precedence when provided (per-layer governance).
+        agent is kept for backward compatibility with orchestrator/response_builder/guardrails.
+        """
+        stmt = select(PromptRegistry).where(
+            PromptRegistry.clinic_id == clinic_id,
+            PromptRegistry.active == True,  # noqa: E712
         )
+        if prompt_type:
+            stmt = stmt.where(PromptRegistry.prompt_type == prompt_type)
+        elif agent:
+            stmt = stmt.where(PromptRegistry.agent == agent)
+        else:
+            return None
+        stmt = stmt.order_by(PromptRegistry.version.desc()).limit(1)
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def update_prompt(self, prompt_id: uuid.UUID, data: dict) -> PromptRegistry | None:

@@ -558,6 +558,46 @@ class RagService:
         )
         return config
 
+    def _extract_entity_signatures(self, text: str) -> list[str]:
+        """Extract lightweight entity mentions from chunk text for GraphRAG traversal.
+
+        Uses simple regex-based extraction (names starting with capital,
+        CRM numbers, specialty names). Returns list of normalized signatures.
+        No NER model required — works with any embedding provider.
+        """
+        import re
+
+        # Capitalized words likely to be names, specialties, procedures
+        # Use string pattern to handle UTF-8 Brazilian Portuguese chars
+        capitalized = re.findall(
+            r'(?<![a-zA-Z0-9\-])([A-Z][a-zA-Zà-ÿÀ-Ü]+(?:\s+[A-Z][a-zA-Zà-ÿÀ-Ü]+)*)',
+            text,
+        )
+        signatures = []
+        for word in capitalized:
+            if len(word) < 3:
+                continue
+            if word.lower() in {
+                'vc', 'você', 'o', 'a', 'os', 'as', 'um', 'uma', 'e', 'é', 'foi', 'ser', 'seu',
+                'sua', 'na', 'no', 'não', 'para', 'com', 'por', 'mais', 'que',
+            }:
+                continue
+            signatures.append(word.strip())
+
+        # CRM pattern (e.g. "CRM/SP 123456")
+        crms = re.findall(r'CRM[/\s]\w{2}\s*\d+', text)
+        for m in crms:
+            signatures.append(m)
+
+        # Unique, limited to top 20 to avoid bloating entity_signatures JSON
+        seen = set()
+        unique = []
+        for s in signatures:
+            if s not in seen and len(unique) < 20:
+                seen.add(s)
+                unique.append(s)
+        return unique
+
     def _embedding_config_error(self, config: EmbeddingRuntimeConfig) -> str | None:
         if config.provider in {"local", "openai", "gemini"}:
             expected_dim = default_embedding_dimension(config.provider)
@@ -591,6 +631,7 @@ class RagService:
         self,
         title: str,
         content: str,
+        clinic_id: str | None = None,
         category: str = "general",
         source_path: str | None = None,
         *,
@@ -600,7 +641,8 @@ class RagService:
         Ingest a document with the full pipeline:
         parse -> chunk -> generate embedding -> persist -> mark embedded=true/false.
         """
-        doc = await self.repo.create_document(title, category, source_path)
+        clinic_id = clinic_id or settings.clinic_id
+        doc = await self.repo.create_document(title, category, clinic_id, source_path)
         chunks = chunk_text(
             content,
             chunk_size=settings.rag_chunk_size,
@@ -651,10 +693,13 @@ class RagService:
                 document_id=doc.id,
                 chunk_index=idx,
                 content=chunk_content,
+                clinic_id=clinic_id,
                 embedding=embedding,
                 embedded=embedding is not None,
                 embedding_error=error,
                 metadata_json=json.dumps({"source": source_path or title, "chunk": idx}),
+                parent_chunk_id=None,  # sibling linking done after loop
+                entity_signatures=self._extract_entity_signatures(chunk_content),
             )
             _log_chunk_status(
                 operation="ingest",
@@ -679,6 +724,22 @@ class RagService:
             str(skip_embeddings).lower(),
         )
 
+        # Sibling linking: link each chunk (except first) to its previous chunk
+        # Done after all inserts so every chunk has its ID and parent_chunk_id can be set
+        chunks_with_ids = await self.repo.get_chunks(doc.id, clinic_id)
+        if len(chunks_with_ids) > 1:
+            for prev, curr in zip(chunks_with_ids, chunks_with_ids[1:]):
+                prev.parent_chunk_id = prev.id
+                curr.parent_chunk_id = prev.id
+                self.repo.session.add(prev)
+                self.repo.session.add(curr)
+            await self.repo.session.commit()
+            logger.info(
+                "[RAG:ingest] document_id=%s sibling_links=%d",
+                doc.id,
+                len(chunks_with_ids) - 1,
+            )
+
         await self.audit.log_event(
             actor_type="system",
             actor_id="rag_service",
@@ -686,6 +747,7 @@ class RagService:
             resource_type="rag_document",
             resource_id=str(doc.id),
             payload={
+                "clinic_id": clinic_id,
                 "title": title,
                 "chunks_total": len(chunks),
                 "chunks_embedded": embedded_count,
@@ -710,15 +772,17 @@ class RagService:
     async def query(
         self,
         query_text: str,
+        clinic_id: str | None = None,
         top_k: int | None = None,
         category: str | None = None,
     ) -> list[RagQueryResult]:
-        execution = await self.query_with_metadata(query_text, top_k=top_k, category=category)
+        execution = await self.query_with_metadata(query_text, clinic_id=clinic_id, top_k=top_k, category=category)
         return execution.results
 
     async def query_with_metadata(
         self,
         query_text: str,
+        clinic_id: str | None = None,
         top_k: int | None = None,
         category: str | None = None,
     ) -> RagQueryExecution:
@@ -738,6 +802,8 @@ class RagService:
           RAG_RERANKER_TOP_K_FINAL   — chunks to LLM (default: 5)
           RAG_TOP_K                  — used when reranker is disabled (default: 5)
         """
+        clinic_id = clinic_id or settings.clinic_id
+
         # When reranker is active, retrieve more candidates for reranking.
         reranker_active = settings.rag_reranker_enabled and self._reranker.model_name != "noop"
         if reranker_active:
@@ -748,7 +814,7 @@ class RagService:
             k_final = k_initial
 
         t0 = time.monotonic()
-        embedded_chunks_available = await self.repo.has_embeddings(category)
+        embedded_chunks_available = await self.repo.has_embeddings(clinic_id, category)
         query_embedding_generated = False
         embedding_config = await self._resolve_embedding_config()
         config_error = self._embedding_config_error(embedding_config)
@@ -774,7 +840,7 @@ class RagService:
                 try:
                     # Stage 1: vector retrieval (larger pool when reranker active)
                     rows = await self.repo.search_similar(
-                        query_embedding, top_k=k_initial, category=category
+                        query_embedding, clinic_id, top_k=k_initial, category=category
                     )
 
                     # Stage 2: lexical boost (fast, always applied)
@@ -880,7 +946,7 @@ class RagService:
             )
 
         # Fallback: text search
-        rows = await self.repo.text_search(query_text, top_k=k_final, category=category)
+        rows = await self.repo.text_search(query_text, clinic_id, top_k=k_final, category=category)
         latency = time.monotonic() - t0
         logger.info(
             "[RAG:query] retrieval_mode=text top_k=%d results=%d rag_used=%s latency=%.3fs",
@@ -897,15 +963,18 @@ class RagService:
     async def text_search(
         self,
         query_text: str,
+        clinic_id: str | None = None,
         top_k: int | None = None,
         category: str | None = None,
     ) -> list[dict]:
         """Text-based search fallback."""
+        clinic_id = clinic_id or settings.clinic_id
         k = top_k or settings.rag_top_k
-        return await self.repo.text_search(query_text, top_k=k, category=category)
+        return await self.repo.text_search(query_text, clinic_id, top_k=k, category=category)
 
     async def reindex_document(
         self,
+        clinic_id: str | None = None,
         doc_id: uuid.UUID | None = None,
         *,
         force: bool = False,
@@ -916,7 +985,8 @@ class RagService:
         force=False reindexes only missing/failed chunks.
         force=True regenerates embeddings for all chunks in scope.
         """
-        chunks = await self.repo.get_chunks_for_reindex(doc_id, force=force)
+        clinic_id = clinic_id or settings.clinic_id
+        chunks = await self.repo.get_chunks_for_reindex(clinic_id, doc_id, force=force)
         processed = 0
         embedded_count = 0
         failed_count = 0
@@ -1011,7 +1081,7 @@ class RagService:
                 )
                 logger.exception("[RAG:reindex] chunk_id=%s failed", chunk.id)
 
-        stats = await self.repo.get_embedding_stats()
+        stats = await self.repo.get_embedding_stats(clinic_id)
         await self.audit.log_event(
             actor_type="system",
             actor_id="rag_service",
@@ -1019,6 +1089,7 @@ class RagService:
             resource_type="rag_document",
             resource_id=str(doc_id) if doc_id else "all",
             payload={
+                "clinic_id": clinic_id,
                 "documents_processed": documents_processed,
                 "chunks_processed": processed,
                 "chunks_embedded": embedded_count,
@@ -1058,8 +1129,9 @@ class RagService:
             "coverage_pct": stats["coverage_pct"],
         }
 
-    async def get_stats(self) -> dict:
-        stats = await self.repo.get_embedding_stats()
+    async def get_stats(self, clinic_id: str | None = None) -> dict:
+        clinic_id = clinic_id or settings.clinic_id
+        stats = await self.repo.get_embedding_stats(clinic_id)
         embedding_config = await self._resolve_embedding_config()
         stats.update(
             {
@@ -1071,17 +1143,21 @@ class RagService:
         )
         return stats
 
-    async def list_documents(self, category: str | None = None) -> list[RagDocument]:
-        return await self.repo.list_documents(category)
+    async def list_documents(self, clinic_id: str | None = None, category: str | None = None) -> list[RagDocument]:
+        clinic_id = clinic_id or settings.clinic_id
+        return await self.repo.list_documents(clinic_id, category)
 
-    async def get_document(self, doc_id: uuid.UUID) -> RagDocument | None:
-        return await self.repo.get_document(doc_id)
+    async def get_document(self, doc_id: uuid.UUID, clinic_id: str | None = None) -> RagDocument | None:
+        clinic_id = clinic_id or settings.clinic_id
+        return await self.repo.get_document(doc_id, clinic_id)
 
-    async def get_chunks(self, doc_id: uuid.UUID):
-        return await self.repo.get_chunks(doc_id)
+    async def get_chunks(self, doc_id: uuid.UUID, clinic_id: str | None = None):
+        clinic_id = clinic_id or settings.clinic_id
+        return await self.repo.get_chunks(doc_id, clinic_id)
 
-    async def delete_document(self, doc_id: uuid.UUID) -> bool:
-        deleted = await self.repo.delete_document(doc_id)
+    async def delete_document(self, doc_id: uuid.UUID, clinic_id: str | None = None) -> bool:
+        clinic_id = clinic_id or settings.clinic_id
+        deleted = await self.repo.delete_document(doc_id, clinic_id)
         if deleted:
             await self.audit.log_event(
                 actor_type="human",
@@ -1089,5 +1165,6 @@ class RagService:
                 action="document.deleted",
                 resource_type="rag_document",
                 resource_id=str(doc_id),
+                payload={"clinic_id": clinic_id},
             )
         return deleted

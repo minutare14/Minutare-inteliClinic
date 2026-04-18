@@ -123,6 +123,7 @@ async def sample_rag_data(session: AsyncSession) -> tuple[RagDocument, list[RagC
     """Create sample RAG documents and chunks."""
     doc = RagDocument(
         id=uuid.uuid4(),
+        clinic_id="clinic01",
         title="Informacoes da Clinica",
         category="operacional",
         status="active",
@@ -143,6 +144,7 @@ async def sample_rag_data(session: AsyncSession) -> tuple[RagDocument, list[RagC
         chunk = RagChunk(
             id=uuid.uuid4(),
             document_id=doc.id,
+            clinic_id="clinic01",
             chunk_index=i,
             content=content,
         )

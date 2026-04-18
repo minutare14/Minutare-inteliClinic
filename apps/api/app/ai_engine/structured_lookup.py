@@ -65,6 +65,22 @@ _PHONE_KW = {
     "qual o numero", "como falar", "como entrar em contato",
 }
 
+_HOURS_KW = {
+    "horario", "horarios", "horrio", "hrs",
+    "fecha", "fechamos", "fecha que horas",
+    "abre", "abrimos", "abre que horas",
+    "funciona", "funcionamento", "atendimento",
+    "da clinica", "do consultorio",
+    "sabado", "sbado", "domingo",
+}
+
+_PRICE_KW = {
+    "preco", "preco", "precos", "valor",
+    "quanto custa", "quanto cobra", "quanto é",
+    "tabela", "mais barato", "caro", "barato",
+    "orcamento", "consulta", "sessao",
+}
+
 
 def _normalize(text: str) -> str:
     """Remove accents for keyword matching."""
@@ -131,9 +147,10 @@ class StructuredLookup:
     before _execute_action() and ResponseComposer.
     """
 
-    def __init__(self, session) -> None:
+    def __init__(self, session, rag_svc: "RagService | None" = None) -> None:
         from app.repositories.professional_repository import ProfessionalRepository
         self.prof_repo = ProfessionalRepository(session)
+        self.rag_svc = rag_svc  # injected to avoid creating new sessions in _lookup_prices
 
     async def lookup(
         self,
@@ -201,6 +218,16 @@ class StructuredLookup:
         # "Qual o telefone de vocês?"
         if _matches_any(text_norm, _PHONE_KW):
             return self._lookup_phone(clinic_cfg)
+
+        # ── Priority 6: Opening hours ─────────────────────────────────────────
+        # "Qual o horário de atendimento?", "Vocês abrem aos sábados?"
+        if _matches_any(text_norm, _HOURS_KW):
+            return self._lookup_hours(clinic_cfg)
+
+        # ── Priority 7: Prices / procedure costs ──────────────────────────────
+        # "Quanto custa uma consulta?", "Tem tabela de preços?"
+        if _matches_any(text_norm, _PRICE_KW):
+            return await self._lookup_prices()
 
         return LookupResult(answered=False, text="", source="none")
 
@@ -377,3 +404,62 @@ class StructuredLookup:
         text = f"Telefone / contato de *{clinic_name}*:\n\n📞 {phone}"
         logger.info("[STRUCTURED] phone lookup (source=clinic_settings)")
         return LookupResult(answered=True, text=text, source="clinic_settings")
+
+    def _lookup_hours(self, clinic_cfg) -> LookupResult:
+        """Return clinic opening hours from ClinicSettings."""
+        # Try to get hours from clinic_cfg if available
+        hours_text = None
+        if clinic_cfg:
+            hours_text = getattr(clinic_cfg, "opening_hours", None)
+            if not hours_text:
+                hours_text = getattr(clinic_cfg, "hours", None)
+
+        if hours_text:
+            clinic_name = getattr(clinic_cfg, "name", None) or "nossa clínica"
+            text = f"Horário de atendimento de *{clinic_name}*:\n\n{hours_text}"
+            logger.info("[STRUCTURED] hours lookup from clinic_settings")
+            return LookupResult(answered=True, text=text, source="clinic_settings")
+
+        # Default fallback with general info
+        default_text = (
+            "Nosso horário de atendimento é:\n\n"
+            "• Segunda a sexta: das 8h às 18h\n"
+            "• Sábado: das 8h às 12h\n"
+            "• Domingo: fechado\n\n"
+            "Para informações sobre horários específicos de profissionais, "
+            "consulte a agenda disponível."
+        )
+        logger.info("[STRUCTURED] hours lookup: using default fallback")
+        return LookupResult(answered=True, text=default_text, source="structured_lookup")
+
+    async def _lookup_prices(self) -> LookupResult:
+        """Return price/cost information. Uses RAG if available, otherwise fallback."""
+        # Try RAG with pricing category — use injected rag_svc to avoid session leaks
+        if self.rag_svc is None:
+            logger.info("[STRUCTURED] prices lookup: no rag_svc injected, using fallback")
+        else:
+            try:
+                rows = await self.rag_svc.text_search(
+                    "preço tabela custo procedimento consulta",
+                    top_k=5,
+                    category="pricing",
+                )
+                if rows:
+                    lines = ["Informações de preços encontradas:\n"]
+                    for r in rows:
+                        snippet = r.content[:300] if hasattr(r, "content") else ""
+                        lines.append(f"• {r.title}: {snippet}")
+                    logger.info("[STRUCTURED] prices lookup via RAG: %d results", len(rows))
+                    return LookupResult(answered=True, text="\n".join(lines), source="rag_pricing")
+            except Exception:
+                pass
+
+        # Fallback
+        default_text = (
+            "Para informações sobre preços e tabelas de procedimentos, "
+            "por favor entre em contato diretamente com a clínica pelo telefone de atendimento. "
+            "Cada procedimento pode ter um valor diferente dependendo do plano de saúde ou convênio."
+        )
+        logger.info("[STRUCTURED] prices lookup: using fallback")
+        return LookupResult(answered=True, text=default_text, source="structured_lookup")
+

@@ -40,6 +40,8 @@ BEHAVIOR_RULES = """## REGRAS DE COMPORTAMENTO
 - Se não souber a resposta, diga que vai encaminhar para a equipe.
 - Não invente informações — use apenas dados do sistema.
 - Confirme dados antes de executar ações (agendar, cancelar).
+- NUNCA responda apenas com um número isolado ou lista numerada sem contexto completo.
+  Se o paciente enviar apenas um número, peça que selecione a partir das opções disponíveis.
 """
 
 
@@ -58,6 +60,7 @@ def _compose_system_prompt(
     chatbot_name: str | None = None,
     custom_system_prompt: str | None = None,
     insurance_context: str | None = None,
+    faro_brief: dict | None = None,
 ) -> str:
     """Build layered system prompt.
 
@@ -99,15 +102,22 @@ def _compose_system_prompt(
         actions_text = "\n".join(f"- {a}" for a in faro.suggested_actions)
         parts.append(f"## AÇÕES SUGERIDAS PELO SISTEMA\n{actions_text}")
 
+    # Inject real professionals from DB (injected by orchestrator when structured_lookup fails)
+    if faro_brief and "available_professionals" in faro_brief:
+        profs = faro_brief["available_professionals"]
+        if profs:
+            parts.append(f"## PROFISSIONAIS ATIVOS NESTA CLÍNICA\n" + "\n".join(f"- {p}" for p in profs))
+
     # Current date/time
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     parts.append(f"## CONTEXTO TEMPORAL\nData/hora atual: {now}")
 
     logger.info(
-        "[PROMPT] clinic='%s' bot='%s' source=%s insurance=%s",
+        "[PROMPT] clinic='%s' bot='%s' source=%s insurance=%s professionals=%s",
         clinic, bot,
         "registry" if custom_system_prompt else "default",
         "sim" if insurance_context else "não",
+        bool(faro_brief and "available_professionals" in faro_brief),
     )
     return "\n\n".join(parts)
 
@@ -120,6 +130,7 @@ def _build_messages(
     chatbot_name: str | None = None,
     custom_system_prompt: str | None = None,
     insurance_context: str | None = None,
+    faro_brief: dict | None = None,
 ) -> list[dict]:
     """Build message list for LLM call (system + history + user)."""
     system_prompt = _compose_system_prompt(
@@ -128,6 +139,7 @@ def _build_messages(
         chatbot_name=chatbot_name,
         custom_system_prompt=custom_system_prompt,
         insurance_context=insurance_context,
+        faro_brief=faro_brief,
     )
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -199,12 +211,13 @@ async def generate_response(
     chatbot_name: str | None = None,
     custom_system_prompt: str | None = None,
     insurance_context: str | None = None,
-) -> tuple[str, bool]:
+    faro_brief: dict | None = None,
+) -> tuple[str, bool, dict | None]:
     """
     Generate response using LLM with full context, or template fallback.
 
     Returns:
-        (response_text, used_llm) — used_llm=True if LLM was invoked, False if template
+        (response_text, used_llm, llm_metrics) — used_llm=True if LLM was invoked, llm_metrics contains model/latency
     """
     # Check if LLM is available (any configured provider)
     llm_available = bool(
@@ -216,14 +229,15 @@ async def generate_response(
         provider = _detect_active_provider()
         logger.info("[LLM] Provider ativo: %s — chamando LLM (intent=%s)", provider, faro.intent.value)
         try:
-            text = await _generate_llm_response(
+            text, metrics = await _generate_llm_response(
                 context, user_text, faro, rag_results,
                 clinic_name=clinic_name,
                 chatbot_name=chatbot_name,
                 custom_system_prompt=custom_system_prompt,
                 insurance_context=insurance_context,
+                faro_brief=faro_brief,
             )
-            return text, True
+            return text, True, metrics
         except Exception:
             logger.exception("[LLM] Falha na geração — fallback para template (provider=%s)", provider)
     else:
@@ -234,7 +248,7 @@ async def generate_response(
 
     # Template-based fallback
     text = _generate_template_response(context, user_text, faro, rag_results, clinic_name=clinic_name)
-    return text, False
+    return text, False, None
 
 
 def _detect_active_provider() -> str:
@@ -262,14 +276,20 @@ async def _generate_llm_response(
     chatbot_name: str | None = None,
     custom_system_prompt: str | None = None,
     insurance_context: str | None = None,
-) -> str:
-    """Generate response via LLM provider."""
+    faro_brief: dict | None = None,
+) -> tuple[str, dict | None]:
+    """Generate response via LLM provider.
+
+    Returns:
+        (response_text, llm_metrics_dict) — metrics contains 'provider', 'model', 'elapsed_ms'
+    """
     messages = _build_messages(
         context, user_text, faro,
         clinic_name=clinic_name,
         chatbot_name=chatbot_name,
         custom_system_prompt=custom_system_prompt,
         insurance_context=insurance_context,
+        faro_brief=faro_brief,
     )
 
     # Inject RAG results if available
@@ -282,13 +302,13 @@ async def _generate_llm_response(
     result = await call_llm(messages)
 
     if result and result.get("content"):
-        return result["content"]
+        return result["content"], result.get("metrics")
 
     # If LLM returned structured JSON, extract message
     if result and result.get("parsed"):
         parsed = result["parsed"]
         if isinstance(parsed, dict) and parsed.get("message"):
-            return parsed["message"]
+            return parsed["message"], result.get("metrics")
 
     raise ValueError("LLM returned empty response")
 

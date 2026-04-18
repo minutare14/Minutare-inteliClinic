@@ -109,6 +109,7 @@ class ConversationState:
     # Response mode
     response_mode: str = "unknown"
     # LangGraph / document pipeline
+    professionals_injected: bool = False  # profissionais reais foram injetados no context
     langgraph_used: bool = False
     document_grading_used: bool = False
     document_grading_threshold: float = 0.0
@@ -167,7 +168,7 @@ class AIOrchestrator:
         self.admin_repo = AdminRepository(session)
         self.audit_svc = AuditService(session)
         self.composer = ResponseComposer(self.rag_svc, self.admin_repo)
-        self.structured_lookup = StructuredLookup(session)
+        self.structured_lookup = StructuredLookup(session, rag_svc=self.rag_svc)
 
     async def process_message(
         self,
@@ -224,13 +225,16 @@ class AIOrchestrator:
                 state.specialties_source = "db"
                 logger.info("[NODE:load_runtime_context] %d especialidades do banco", len(db_specialties))
 
-            active_prompt = await self.admin_repo.get_active_prompt(settings.clinic_id, "response_builder")
+            active_prompt = await self.admin_repo.get_active_prompt(
+                settings.clinic_id, agent="response_builder", prompt_type="system_base"
+            )
             if active_prompt:
                 custom_system_prompt = active_prompt.content
                 state.prompt_source = "db_registry"
                 logger.info(
-                    "[NODE:load_runtime_context] PromptRegistry ativo: '%s' v%d agent=%s",
+                    "[NODE:load_runtime_context] PromptRegistry ativo: '%s' v%d agent=%s prompt_type=%s",
                     active_prompt.name, active_prompt.version, active_prompt.agent,
+                    active_prompt.prompt_type,
                 )
             else:
                 logger.info(
@@ -248,6 +252,27 @@ class AIOrchestrator:
                 state.source_of_truth = "schedule_db"
                 await self._audit(conversation, user_text, state, result)
                 return result
+
+        # ══ NODE 2b: numeric-only input guard ════════════════════════════════
+        # Catch bare numbers (e.g. "1", "2") that aren't part of any active flow.
+        # Without this, numeric inputs become DESCONHECIDA and reach the LLM,
+        # which sees numbered-option history and may imitate the pattern.
+        if self._is_bare_number(user_text):
+            state.route = "fallback"
+            state.source_of_truth = "numeric_guard"
+            logger.info("[NODE:numeric_guard] input='%s' — returning clarification", user_text)
+            resp = EngineResponse(
+                text="Não entendi sua resposta. Você pode dizer por extenso o que prefere? "
+                     "Por exemplo: 'agendar consulta', 'cancelar' ou 'ver horários'?",
+                intent=Intent.DESCONHECIDA,
+                confidence=0.3,
+                guardrail_action="allow",
+                faro_brief=None,
+                route=state.route,
+                source_of_truth=state.source_of_truth,
+            )
+            await self._audit(conversation, user_text, state, resp)
+            return resp
 
         # ══ NODE 3: analyze_intent_and_entities (FARO) ══════════════════════
         faro = intent_router.analyze(user_text, specialties_override=specialties_override)
@@ -415,6 +440,8 @@ class AIOrchestrator:
             "[NODE:response_composer] intent=%s prompt_source=%s insurance=%s",
             faro.intent.value, state.prompt_source, bool(insurance_context),
         )
+        # Inject real professionals into context so composer uses live data
+        await self._inject_professionals_into_context(state, patient)
         composed = await self.composer.compose(
             context=context,
             faro=faro,
@@ -903,6 +930,37 @@ class AIOrchestrator:
         return EngineResponse(
             text=result.message, intent=Intent.AGENDAR, confidence=1.0, guardrail_action="allow",
         )
+
+    def _is_bare_number(self, text: str) -> bool:
+        """Return True if text is nothing but digits (no meaningful words)."""
+        stripped = text.strip()
+        if not stripped:
+            return False
+        # Must contain only digits (no letters, no meaningful punctuation)
+        # "123", "1", "  2  " → bare number
+        # "1am", "k1", "10 reais" → not bare
+        return stripped.replace(" ", "").isdigit() and stripped.isdigit()
+
+    async def _inject_professionals_into_context(
+        self, state: ConversationState, patient: Patient | None
+    ) -> None:
+        """Carrega profissionais reais do banco e injeta no faro_brief para o composer."""
+        if state.professionals_injected:
+            return
+        try:
+            repo = AdminRepository(self.session)
+            profs = await repo.list_professionals(active_only=True)
+            names = [f"{p.name} ({p.specialty})" for p in profs if p.name]
+            if names:
+                state.faro_brief = state.faro_brief or {}
+                state.faro_brief["available_professionals"] = names
+                state.professionals_injected = True
+                logger.debug(
+                    "[PROFESSIONALS] Injetados %d profissionais reais no context",
+                    len(names),
+                )
+        except Exception as exc:
+            logger.warning("[PROFESSIONALS] Falha ao carregar profissionais reais: %s", exc)
 
     def _extract_number(self, text: str) -> int | None:
         match = re.search(r"\b(\d+)\b", text)

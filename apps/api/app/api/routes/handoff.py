@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
 from app.core.db import get_session
+from app.models.auth import User
 from app.schemas.conversation import HandoffCreate, HandoffRead
 from app.services.handoff_service import HandoffService
 from app.services.conversation_service import ConversationService
@@ -24,6 +26,7 @@ async def list_handoffs(
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> list[HandoffRead]:
     svc = ConversationService(session)
     handoffs = await svc.list_handoffs(status=status, limit=limit, offset=offset)
@@ -34,6 +37,7 @@ async def list_handoffs(
 async def create_handoff(
     data: HandoffCreate,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> HandoffRead:
     svc = HandoffService(session)
     handoff = await svc.create(
@@ -50,6 +54,7 @@ async def update_handoff_status(
     handoff_id: uuid.UUID,
     data: HandoffStatusUpdate,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> HandoffRead:
     svc = ConversationService(session)
     handoff = await svc.update_handoff_status(handoff_id, data.status)

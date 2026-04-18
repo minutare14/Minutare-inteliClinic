@@ -5,7 +5,9 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
 from app.core.db import get_session
+from app.models.auth import User
 from app.schemas.conversation import ConversationRead, ConversationStatusUpdate, MessageRead
 from app.services.conversation_service import ConversationService
 
@@ -19,6 +21,7 @@ async def list_conversations(
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> list[ConversationRead]:
     svc = ConversationService(session)
     convs = await svc.list_conversations(
@@ -31,6 +34,7 @@ async def list_conversations(
 async def get_conversation(
     conversation_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> ConversationRead:
     svc = ConversationService(session)
     conv = await svc.get_by_id(conversation_id)
@@ -44,6 +48,7 @@ async def update_conversation_status(
     conversation_id: uuid.UUID,
     data: ConversationStatusUpdate,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> ConversationRead:
     svc = ConversationService(session)
     conv = await svc.update_status(conversation_id, data.status)
@@ -56,6 +61,7 @@ async def update_conversation_status(
 async def get_messages(
     conversation_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> list[MessageRead]:
     svc = ConversationService(session)
     messages = await svc.get_messages(conversation_id)

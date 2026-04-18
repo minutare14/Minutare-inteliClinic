@@ -102,6 +102,7 @@ class PromptRegistry(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     clinic_id: str = Field(default="default", max_length=64, index=True)
     agent: str = Field(max_length=64, index=True)  # orchestrator | response_builder | guardrails
+    prompt_type: str | None = Field(default=None, max_length=64, index=True)  # system_base | persona | behavior_rules | safety_rules | query_rewrite | document_grading
     scope: str = Field(default="global", max_length=32)  # global | clinic | runtime
     name: str = Field(max_length=128)
     description: str | None = Field(default=None, max_length=512)

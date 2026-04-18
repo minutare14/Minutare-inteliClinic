@@ -36,6 +36,8 @@ class ComposedResponse:
     reranker_fallback: bool = False
     reranker_ranking_changed: bool = False
     langgraph_used: bool = False
+    llm_model: str | None = None
+    llm_latency_ms: float = 0.0
     document_grading_used: bool = False
     document_grading_threshold: float = 0.0
     document_grading_strategy: str = "disabled"
@@ -65,6 +67,7 @@ class ResponseComposer:
         *,
         context: ConversationContext,
         faro: FaroBrief,
+        faro_brief: dict | None = None,
         user_text: str,
         clinic_cfg: ClinicSettings | None = None,
         clinic_name: str | None = None,
@@ -87,6 +90,7 @@ class ResponseComposer:
         result = await self.document_graph.run(
             context=context,
             faro=faro,
+            faro_brief=faro_brief,
             user_text=user_text,
             clinic_name=clinic_name,
             chatbot_name=chatbot_name,
@@ -134,4 +138,6 @@ class ResponseComposer:
             prompt_source_document_grading=result.prompt_source_document_grading,
             selected_chunks=result.selected_chunks,
             audit_payload=result.audit_payload,
+            llm_model=result.llm_model,
+            llm_latency_ms=result.llm_latency_ms,
         )

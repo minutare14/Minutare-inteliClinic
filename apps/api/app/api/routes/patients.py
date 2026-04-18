@@ -5,7 +5,9 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
 from app.core.db import get_session
+from app.models.auth import User
 from app.schemas.patient import PatientCreate, PatientRead, PatientUpdate
 from app.services.patient_service import PatientService
 
@@ -17,6 +19,7 @@ async def list_patients(
     limit: int = Query(100, le=500),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> list[PatientRead]:
     svc = PatientService(session)
     patients = await svc.list_patients(limit=limit, offset=offset)
@@ -27,6 +30,7 @@ async def list_patients(
 async def create_patient(
     data: PatientCreate,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> PatientRead:
     svc = PatientService(session)
     patient = await svc.create_patient(data)
@@ -37,6 +41,7 @@ async def create_patient(
 async def get_patient(
     patient_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> PatientRead:
     svc = PatientService(session)
     patient = await svc.get_patient(patient_id)
@@ -49,6 +54,7 @@ async def get_patient(
 async def get_patient_by_telegram(
     telegram_user_id: str,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> PatientRead:
     svc = PatientService(session)
     patient = await svc.get_by_telegram(telegram_user_id)
@@ -62,6 +68,7 @@ async def update_patient(
     patient_id: uuid.UUID,
     data: PatientUpdate,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> PatientRead:
     svc = PatientService(session)
     patient = await svc.update_patient(patient_id, data)

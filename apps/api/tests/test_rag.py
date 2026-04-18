@@ -94,6 +94,7 @@ class TestRagIngest:
 
         doc = RagDocument(
             id=uuid.uuid4(),
+            clinic_id="clinic01",
             title="Legacy Doc",
             category="faq",
             status="active",
@@ -105,6 +106,7 @@ class TestRagIngest:
         chunk = RagChunk(
             id=uuid.uuid4(),
             document_id=doc.id,
+            clinic_id="clinic01",
             chunk_index=0,
             content="Conteudo legado sem embedding",
             embedded=False,
@@ -217,10 +219,10 @@ class TestRagRetrieval:
     async def test_query_prefers_vector_when_embeddings_exist(self, session: AsyncSession, monkeypatch):
         svc = RagService(session)
 
-        async def fake_has_embeddings(category=None):
+        async def fake_has_embeddings(clinic_id, category=None):
             return True
 
-        async def fake_search_similar(query_embedding, top_k=5, category=None):
+        async def fake_search_similar(query_embedding, clinic_id, top_k=5, category=None):
             return [
                 {
                     "chunk_id": uuid.uuid4(),

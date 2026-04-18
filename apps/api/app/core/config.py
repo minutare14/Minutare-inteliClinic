@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -140,8 +141,36 @@ class Settings(BaseSettings):
         return self.app_env == "development"
 
     @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
+
+    @property
     def langsmith_enabled(self) -> bool:
         return self.langsmith_tracing and bool(self.langsmith_api_key)
+
+    @model_validator(mode="after")
+    def _clinic_id_required_in_production(self) -> "Settings":
+        """Fail fast if CLINIC_ID is not explicitly set in production.
+
+        When CLINIC_ID is absent from the environment, pydantic-settings uses the
+        default "clinic01".  This is almost never correct for production — it means
+        the deploy is silently serving as "clinic01" without any configuration.
+
+        We detect "unset" by checking whether the env var name appears in the
+        model's fields that were initialised from an env source.  If clinic_id
+        still has the default value AND we are in production, raise immediately.
+        """
+        import os
+
+        clinic_id_from_env = os.environ.get("CLINIC_ID", "") != ""
+        if self.app_env == "production" and not clinic_id_from_env:
+            raise ValueError(
+                "[CONFIG] CLINIC_ID environment variable is not set in production. "
+                "This is a multi-tenant safety guard — the system would silently "
+                "operate as 'clinic01' without isolation. "
+                "Set the CLINIC_ID environment variable to the correct clinic identifier."
+            )
+        return self
 
 
 settings = Settings()

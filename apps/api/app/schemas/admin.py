@@ -141,6 +141,7 @@ class SpecialtyRead(BaseModel):
 
 class PromptCreate(BaseModel):
     agent: str
+    prompt_type: str | None = None  # system_base | persona | behavior_rules | safety_rules | query_rewrite | document_grading
     scope: str = "global"
     name: str
     description: str | None = None
@@ -158,6 +159,7 @@ class PromptRead(BaseModel):
     id: uuid.UUID
     clinic_id: str
     agent: str
+    prompt_type: str | None = None
     scope: str
     name: str
     description: str | None

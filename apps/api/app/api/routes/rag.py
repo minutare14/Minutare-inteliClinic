@@ -5,7 +5,10 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
+from app.core.config import settings
 from app.core.db import get_session
+from app.models.auth import User
 from app.schemas.rag import (
     RagChunkRead,
     RagDocumentRead,
@@ -23,11 +26,13 @@ router = APIRouter(prefix="/rag", tags=["rag"])
 async def ingest_document(
     data: RagIngestRequest,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> RagIngestResponse:
     svc = RagService(session)
     return await svc.ingest_document(
         title=data.title,
         content=data.content,
+        clinic_id=settings.clinic_id,
         category=data.category,
         source_path=data.source_path,
     )
@@ -37,10 +42,12 @@ async def ingest_document(
 async def query_rag(
     data: RagQueryRequest,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> list[RagQueryResult]:
     svc = RagService(session)
     return await svc.query(
         query_text=data.query,
+        clinic_id=settings.clinic_id,
         top_k=data.top_k,
         category=data.category,
     )
@@ -50,9 +57,10 @@ async def query_rag(
 async def list_documents(
     category: str | None = None,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> list[RagDocumentRead]:
     svc = RagService(session)
-    docs = await svc.list_documents(category)
+    docs = await svc.list_documents(settings.clinic_id, category)
     return [RagDocumentRead.model_validate(d) for d in docs]
 
 
@@ -60,9 +68,10 @@ async def list_documents(
 async def get_document_chunks(
     doc_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> list[RagChunkRead]:
     svc = RagService(session)
-    chunks = await svc.get_chunks(doc_id)
+    chunks = await svc.get_chunks(doc_id, settings.clinic_id)
     return [
         RagChunkRead(
             id=c.id,
@@ -83,9 +92,10 @@ async def get_document_chunks(
 async def delete_document(
     doc_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> None:
     svc = RagService(session)
-    deleted = await svc.delete_document(doc_id)
+    deleted = await svc.delete_document(doc_id, settings.clinic_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -93,6 +103,7 @@ async def delete_document(
 @router.get("/stats")
 async def get_rag_stats(
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> dict:
     """
     Returns embedding coverage stats for the admin panel.
@@ -109,7 +120,7 @@ async def get_rag_stats(
       config_error: explicit incompatibility or missing-key reason, if any
     """
     svc = RagService(session)
-    return await svc.get_stats()
+    return await svc.get_stats(settings.clinic_id)
 
 
 @router.post("/reindex")
@@ -117,6 +128,7 @@ async def reindex_documents(
     doc_id: uuid.UUID | None = None,
     force: bool = False,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> dict:
     """
     Regenerate embeddings for chunks without embedding.
@@ -140,5 +152,5 @@ async def reindex_documents(
       config_error: explicit incompatibility or missing-key reason, if any
     """
     svc = RagService(session)
-    result = await svc.reindex_document(doc_id, force=force)
+    result = await svc.reindex_document(settings.clinic_id, doc_id, force=force)
     return result

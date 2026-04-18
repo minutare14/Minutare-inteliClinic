@@ -56,6 +56,7 @@ SAFE_RAG_FALLBACK = (
 class DocumentGraphState(TypedDict, total=False):
     context: ConversationContext
     faro: FaroBrief
+    faro_brief: dict | None  # injected real professionals from DB
     user_text: str
     clinic_name: str | None
     chatbot_name: str | None
@@ -96,6 +97,8 @@ class DocumentGraphState(TypedDict, total=False):
     reranker_ranking_changed: bool
     fallback_used: bool
     langgraph_used: bool
+    llm_model: str | None  # actual model used by LLM provider
+    llm_latency_ms: float  # latency of the final LLM call
     audit_payload: dict[str, Any]
 
 
@@ -117,6 +120,8 @@ class DocumentRuntimeResult:
     reranker_fallback: bool = False
     reranker_ranking_changed: bool = False
     langgraph_used: bool = False
+    llm_model: str | None = None
+    llm_latency_ms: float = 0.0
     document_grading_used: bool = False
     document_grading_threshold: float = 0.0
     document_grading_strategy: str = "disabled"
@@ -146,6 +151,7 @@ class DocumentRuntimeGraph:
         *,
         context: ConversationContext,
         faro: FaroBrief,
+        faro_brief: dict | None = None,
         user_text: str,
         clinic_name: str | None,
         chatbot_name: str | None,
@@ -162,6 +168,7 @@ class DocumentRuntimeGraph:
         initial_state: DocumentGraphState = {
             "context": context,
             "faro": faro,
+            "faro_brief": faro_brief,
             "user_text": user_text,
             "clinic_name": clinic_name,
             "chatbot_name": chatbot_name,
@@ -202,6 +209,8 @@ class DocumentRuntimeGraph:
             "reranker_ranking_changed": False,
             "fallback_used": False,
             "langgraph_used": settings.langgraph_runtime_enabled and LANGGRAPH_AVAILABLE,
+            "llm_model": None,
+            "llm_latency_ms": 0.0,
             "audit_payload": {},
         }
 
@@ -306,8 +315,25 @@ class DocumentRuntimeGraph:
             prompt_sources = dict(state.get("prompt_sources") or {})
             prompt_contents = dict(state.get("prompt_contents") or {})
 
-            query_rewrite_prompt = await self.admin_repo.get_active_prompt(settings.clinic_id, "query_rewrite")
-            document_grading_prompt = await self.admin_repo.get_active_prompt(settings.clinic_id, "document_grading")
+            query_rewrite_prompt = await self.admin_repo.get_active_prompt(
+                settings.clinic_id, agent="query_rewrite", prompt_type="query_rewrite"
+            )
+            document_grading_prompt = await self.admin_repo.get_active_prompt(
+                settings.clinic_id, agent="document_grading", prompt_type="document_grading"
+            )
+            # Load per-layer prompts for response builder (system_base, persona, behavior_rules, safety_rules)
+            system_base_prompt = await self.admin_repo.get_active_prompt(
+                settings.clinic_id, prompt_type="system_base"
+            )
+            persona_prompt = await self.admin_repo.get_active_prompt(
+                settings.clinic_id, prompt_type="persona"
+            )
+            behavior_rules_prompt = await self.admin_repo.get_active_prompt(
+                settings.clinic_id, prompt_type="behavior_rules"
+            )
+            safety_rules_prompt = await self.admin_repo.get_active_prompt(
+                settings.clinic_id, prompt_type="safety_rules"
+            )
 
             if query_rewrite_prompt:
                 prompt_sources["query_rewrite"] = "db_registry"
@@ -322,6 +348,20 @@ class DocumentRuntimeGraph:
             else:
                 prompt_sources["document_grading"] = "default"
                 prompt_contents["document_grading"] = DEFAULT_DOCUMENT_GRADING_PROMPT
+
+            # Load per-layer prompt overrides for system prompt construction
+            if system_base_prompt:
+                prompt_sources["system_base"] = "db_registry"
+                prompt_contents["system_base"] = system_base_prompt.content
+            if persona_prompt:
+                prompt_sources["persona"] = "db_registry"
+                prompt_contents["persona"] = persona_prompt.content
+            if behavior_rules_prompt:
+                prompt_sources["behavior_rules"] = "db_registry"
+                prompt_contents["behavior_rules"] = behavior_rules_prompt.content
+            if safety_rules_prompt:
+                prompt_sources["safety_rules"] = "db_registry"
+                prompt_contents["safety_rules"] = safety_rules_prompt.content
 
             if run is not None:
                 run.end(outputs={"prompt_sources": prompt_sources})
@@ -633,7 +673,7 @@ class DocumentRuntimeGraph:
                         }
                         for row in final_rows
                     ]
-                    text, used_llm = await generate_response(
+                    text, used_llm, llm_metrics = await generate_response(
                         context=state["context"],
                         user_text=state["user_text"],
                         faro=state["faro"],
@@ -642,6 +682,7 @@ class DocumentRuntimeGraph:
                         chatbot_name=state.get("chatbot_name"),
                         custom_system_prompt=state.get("custom_system_prompt"),
                         insurance_context=state.get("insurance_context"),
+                        faro_brief=state.get("faro_brief"),
                     )
                     mode = "rag_llm" if used_llm else "rag_template"
                     fallback_used = False
@@ -651,8 +692,9 @@ class DocumentRuntimeGraph:
                     fallback_used = True
                     state["route"] = "clarification_flow"
                     state["source_of_truth"] = "template"
+                    llm_metrics = None
             else:
-                text, used_llm = await generate_response(
+                text, used_llm, llm_metrics = await generate_response(
                     context=state["context"],
                     user_text=state["user_text"],
                     faro=state["faro"],
@@ -661,9 +703,17 @@ class DocumentRuntimeGraph:
                     chatbot_name=state.get("chatbot_name"),
                     custom_system_prompt=state.get("custom_system_prompt"),
                     insurance_context=state.get("insurance_context"),
+                    faro_brief=state.get("faro_brief"),
                 )
                 mode = "llm" if used_llm else "template"
                 fallback_used = not used_llm
+
+            # Extract LLM telemetry for audit trail
+            llm_model = None
+            llm_latency_ms = 0.0
+            if llm_metrics:
+                llm_model = llm_metrics.get("model")
+                llm_latency_ms = float(llm_metrics.get("elapsed_ms", 0.0))
 
             if run is not None:
                 run.end(outputs={"mode": mode, "response_preview": text[:240]})
@@ -671,6 +721,8 @@ class DocumentRuntimeGraph:
                 "response_text": text,
                 "mode": mode,
                 "fallback_used": fallback_used,
+                "llm_model": llm_model,
+                "llm_latency_ms": llm_latency_ms,
             }
 
     async def _persist_and_audit(self, state: DocumentGraphState) -> dict[str, Any]:
@@ -687,6 +739,8 @@ class DocumentRuntimeGraph:
             "route": state.get("route"),
             "source_of_truth": state.get("source_of_truth"),
             "mode": state.get("mode"),
+            "llm_model": state.get("llm_model"),
+            "llm_latency_ms": round(state.get("llm_latency_ms", 0.0), 2),
             "retrieval_mode": state.get("retrieval_mode"),
             "retrieval_attempts": state.get("retrieval_attempts", 0),
             "query_rewrite_used": state.get("query_rewrite_used", False),
@@ -711,7 +765,8 @@ class DocumentRuntimeGraph:
         return {}
 
     async def _retrieve_candidates(self, query_text: str, top_k: int) -> tuple[list[dict[str, Any]], str]:
-        embedded_chunks_available = await self.rag_svc.repo.has_embeddings(None)
+        clinic_id = settings.clinic_id
+        embedded_chunks_available = await self.rag_svc.repo.has_embeddings(clinic_id, None)
         embedding_config = await self.rag_svc._resolve_embedding_config()
         config_error = self.rag_svc._embedding_config_error(embedding_config)
 
@@ -722,12 +777,12 @@ class DocumentRuntimeGraph:
                 embedding_config=embedding_config,
             )
             if query_embedding is not None:
-                rows = await self.rag_svc.repo.search_similar(query_embedding, top_k=top_k)
+                rows = await self.rag_svc.repo.search_similar(query_embedding, clinic_id, top_k=top_k)
                 rows = _rerank_vector_rows(query_text, rows)
                 if rows:
                     return rows, "vector"
 
-        rows = await self.rag_svc.repo.text_search(query_text, top_k=top_k)
+        rows = await self.rag_svc.repo.text_search(query_text, clinic_id, top_k=top_k)
         return rows, "text"
 
     def _heuristic_grade(
@@ -905,6 +960,8 @@ class DocumentRuntimeGraph:
             reranker_fallback=state.get("reranker_fallback", False),
             reranker_ranking_changed=state.get("reranker_ranking_changed", False),
             langgraph_used=state.get("langgraph_used", False),
+            llm_model=state.get("llm_model"),
+            llm_latency_ms=state.get("llm_latency_ms", 0.0),
             document_grading_used=state.get("document_grading_used", False),
             document_grading_threshold=state.get("document_grading_threshold", 0.0),
             document_grading_strategy=state.get("document_grading_strategy", "disabled"),

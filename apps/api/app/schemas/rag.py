@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class RagDocumentRead(BaseModel):
     id: uuid.UUID
+    clinic_id: str
     title: str
     category: str
     source_path: str | None

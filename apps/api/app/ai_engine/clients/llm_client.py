@@ -296,6 +296,7 @@ async def _http_call(
                 "parsed": parsed,
                 "metrics": {
                     "provider": provider,
+                    "model": body.get("model", "unknown"),
                     "elapsed_ms": elapsed_ms,
                     "attempt": attempt,
                 },

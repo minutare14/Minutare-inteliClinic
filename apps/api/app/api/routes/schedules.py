@@ -6,7 +6,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
 from app.core.db import get_session
+from app.models.auth import User
 from app.schemas.schedule import ScheduleSlotCreate, ScheduleSlotRead
 from app.services.schedule_service import ScheduleService
 
@@ -17,6 +19,7 @@ router = APIRouter(prefix="/schedules", tags=["schedules"])
 async def create_slot(
     data: ScheduleSlotCreate,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> ScheduleSlotRead:
     svc = ScheduleService(session)
     slot = await svc.create_slot(data)
@@ -31,6 +34,7 @@ async def list_slots(
     date_to: datetime | None = Query(None),
     status: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> list[ScheduleSlotRead]:
     svc = ScheduleService(session)
     slots = await svc.list_slots(
@@ -49,6 +53,7 @@ async def book_slot(
     patient_id: uuid.UUID = Query(...),
     source: str = Query("manual"),
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> ScheduleSlotRead:
     svc = ScheduleService(session)
     slot = await svc.book_slot(slot_id, patient_id, source)
@@ -61,6 +66,7 @@ async def book_slot(
 async def cancel_slot(
     slot_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(get_current_user),
 ) -> ScheduleSlotRead:
     svc = ScheduleService(session)
     slot = await svc.cancel_slot(slot_id)
