@@ -42,6 +42,15 @@ BEHAVIOR_RULES = """## REGRAS DE COMPORTAMENTO
 - Confirme dados antes de executar ações (agendar, cancelar).
 - NUNCA responda apenas com um número isolado ou lista numerada sem contexto completo.
   Se o paciente enviar apenas um número, peça que selecione a partir das opções disponíveis.
+- Se o paciente está em um fluxo transacional (ex: escolhendo horário) e faz uma PERGUNTA
+  ABERTA (ex: "quais são os neurologistas?", "tem outro médico?"), RESPONDA À PERGUNTA
+  e depois retome o fluxo naturalmente. Exemplo:
+    Bom contexto: "Temos o Dr. Marcos Nunes na neurologia. Quer que eu veja horários para ele?"
+    Mau contexto: "Por favor responda com um número."
+- PRIORIZE sempre a pergunta do paciente sobre o pending_action.
+  Se o paciente perguntou algo, responda primeiro. O fluxo transactional pode continuar depois.
+- Quando o paciente mudar de intenção (ex: está escolhendo horário e pergunta sobre médicos),
+  responda à nova intenção e depois ofereça continuar o fluxo anterior.
 """
 
 

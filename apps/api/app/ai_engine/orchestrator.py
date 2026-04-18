@@ -1,24 +1,5 @@
 """
 AI Engine Orchestrator — Stage 3 pipeline with structured data lookup.
-
-Pipeline nodes (in order):
-  1.  ingest_message          — receives user_text, patient, conversation
-  2.  load_runtime_context    — ClinicSettings + PromptRegistry + Insurance + Specialties
-  3.  resolve_conversation_state — check pending multi-turn action
-  4.  analyze_intent_and_entities — FARO (deterministic + entity extraction)
-  5.  policy_guardrails        — pre-response: injection, consent
-  6.  decision_router          — decides the route taken
-  7.  route handlers:
-        structured_data_lookup → direct answer from DB records (Priority 1)
-        schedule_flow          → AGENDAR / CANCELAR / REMARCAR
-        rag_retrieval + llm    → DUVIDA_OPERACIONAL / POLITICAS
-        clarification_flow     → DESCONHECIDA / missing fields
-        handoff_flow           → FALAR_COM_HUMANO / urgency / clinical
-  8.  response_composer        — unified response assembly
-  9.  post_guardrails          — urgency, clinical, confidence
-  10. persist_and_audit        — structured log with full decision trace
-  11. emit_response            — EngineResponse returned to webhook
-
 Multi-turn state managed via conversation.pending_action (JSON).
 Entry point: process_message() called from Telegram webhook handler.
 """
@@ -29,6 +10,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
+from enum import Enum
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,6 +34,84 @@ from app.services.conversation_service import ConversationService
 from app.services.rag_service import RagService
 
 logger = logging.getLogger(__name__)
+
+
+class UserIntent(str, Enum):
+    """
+    First-pass intent classification BEFORE pending_action resolution.
+    Used to detect when a user breaks out of a transactional flow.
+
+    Categories:
+      CONTINUA_FLUXO — replies that advance an existing pending_action
+      PERGUNTA_ABERTA — informational question that should NOT be blocked by pending_action
+      NOVA_INTENCAO  — new transactional intent that cancels pending_action
+      CANCELAMENTO   — explicit cancellation/exit from current flow
+    """
+    CONTINUA_FLUXO = "continua_fluxo"
+    PERGUNTA_ABERTA = "pergunta_aberta"
+    NOVA_INTENCAO = "nova_intencao"
+    CANCELAMENTO = "cancelamento"
+    DESCONHECIDO = "desconhecido"
+
+
+# ─── Intent escape patterns ─────────────────────────────────────────────────
+
+_CANCEL_WORDS = {
+    "cancelar", "desistir", "nao", "não", "sair", "voltar",
+    "para", "para tudo", "esquece", "esqueça", "cancela",
+}
+
+# Words that indicate the user is asking something open (not just replying)
+_OPEN_QUESTION_WORDS = {
+    "quem", "qual", "quais", "que", "oq", "o que",
+    "como", "onde", "por que", "porque", "quanto", "quantos",
+    "tem", "existe", "existem", "voces", "voces",
+    "doutor", "dra", "dr", "medico", "medicos", "medica",
+    "neurologista", "cardiologista", "ortopedista",
+    "horario", "horários", "endereco", "telefone",
+    "preco", "preços", "valor", "quanto custa",
+    "outro", "outros", "outra", "outras",
+    "diferente", "outro médico", "outra especialidade",
+}
+
+# Transactional intent keywords that signal a NEW intent (breaks pending_action)
+_NEW_INTENT_WORDS = {
+    "agendar", "marcar consulta", "remarcar", "reagendar",
+    "cancelar", "desmarcar",
+    "falar com", "atendente", "humano",
+    "quero saber", "preciso saber", "gostaria de saber",
+}
+
+
+def _classify_user_intent(text: str) -> UserIntent:
+    """
+    First-pass classification of user message BEFORE pending_action resolution.
+    This determines whether the user's message should interrupt a transactional flow.
+    """
+    text_lower = text.strip().lower()
+
+    # 1. CANCELAMENTO — explicit exit from flow
+    if any(w in text_lower for w in _CANCEL_WORDS):
+        return UserIntent.CANCELAMENTO
+
+    # 2. NOVA_INTENCAO — transactional intent that overrides pending_action
+    if any(w in text_lower for w in _NEW_INTENT_WORDS):
+        return UserIntent.NOVA_INTENCAO
+
+    # 3. PERGUNTA_ABERTA — user is asking a real question
+    # Count how many open-question markers are present
+    open_markers = sum(1 for w in _OPEN_QUESTION_WORDS if w in text_lower)
+    # Also detect if message has question structure (? or iniciar frase com o que/qual)
+    has_question = "?" in text_lower or text_lower.startswith(("o que", "qual", "quais", "que", "como", "onde", "quem", "por que"))
+    if open_markers >= 2 or has_question:
+        return UserIntent.PERGUNTA_ABERTA
+
+    # 4. CONTINUA_FLUXO — short reply (number or short confirmation)
+    if len(text.strip()) <= 3:
+        return UserIntent.CONTINUA_FLUXO
+
+    # Otherwise unknown — treat conservatively (don't break flow by default)
+    return UserIntent.DESCONHECIDO
 
 
 # ─── Conversation State ───────────────────────────────────────────────────────
@@ -246,18 +306,42 @@ class AIOrchestrator:
         # ══ NODE 2: resolve_conversation_state (multi-turn) ═════════════════
         pending = self._load_pending_action(conversation)
         if pending:
-            result = await self._handle_pending_action(patient, conversation, user_text, pending)
-            if result is not None:
-                state.route = "multi_turn"
-                state.source_of_truth = "schedule_db"
-                await self._audit(conversation, user_text, state, result)
-                return result
+            # ─── ESCAPE VALVE: check if user broke out of transactional flow ────
+            # Before blindly following pending_action, classify the user's message.
+            # This prevents the AI from ignoring real questions while in a flow.
+            user_intent = _classify_user_intent(user_text)
+            logger.info(
+                "[NODE:resolve_conversation_state] pending_action type=%s user_intent=%s text='%.50r'",
+                pending.get("type"), user_intent.value, user_text,
+            )
+
+            if user_intent in (UserIntent.PERGUNTA_ABERTA, UserIntent.NOVA_INTENCAO, UserIntent.CANCELAMENTO):
+                # User asked a real question or launched a new intent — clear flow
+                # and let the normal pipeline handle it
+                logger.info(
+                    "[NODE:resolve_conversation_state] user_intent=%s — clearing pending_action, falling through",
+                    user_intent.value,
+                )
+                await self._save_pending_action(conversation, None)
+                pending = None  # fall through to normal intent analysis
+            else:
+                result = await self._handle_pending_action(patient, conversation, user_text, pending)
+                if result is not None:
+                    state.route = "multi_turn"
+                    state.source_of_truth = "schedule_db"
+                    await self._audit(conversation, user_text, state, result)
+                    return result
 
         # ══ NODE 2b: numeric-only input guard ════════════════════════════════
         # Catch bare numbers (e.g. "1", "2") that aren't part of any active flow.
         # Without this, numeric inputs become DESCONHECIDA and reach the LLM,
         # which sees numbered-option history and may imitate the pattern.
-        if self._is_bare_number(user_text):
+        #
+        # NOTE: This guard is skipped when pending_action is active, because
+        # numbers ARE valid slot selections inside transactional flows.
+        # The escape valve (NODE 2) handles breaking OUT of flows.
+        has_pending = self._load_pending_action(conversation) is not None
+        if not has_pending and self._is_bare_number(user_text):
             state.route = "fallback"
             state.source_of_truth = "numeric_guard"
             logger.info("[NODE:numeric_guard] input='%s' — returning clarification", user_text)

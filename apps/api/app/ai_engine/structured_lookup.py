@@ -45,6 +45,9 @@ _SPECIALTY_DOCTORS_KW = {
     "quais medicos", "quem atende", "qual medico",
     "tem medico", "tem doutor", "tem dra", "tem dr",
     "profissional em", "profissionais de",
+    "quais sao", "quais sao os", "me mostra",
+    "quais neurologistas", "quais cardiologistas",
+    "listar", "mostra os", "quais profissionais",
 }
 
 _INSURANCE_KW = {
