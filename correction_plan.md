@@ -1143,9 +1143,27 @@ Se o problema persistir após as migrations idempotentes, as causas prováveis e
 3. **Erro de import em algum módulo** — `crm_router` ou `google_router` referencing non-existent services.飞
 4. **Memória insuficiente no container** — uvicorn worker killed pelo OOM killer.飞
 
-**Ação:** Se o container ainda ficar `unhealthy` após rebuild, coletar logs com:
+### Causa raiz real (confirmada após investigação detalhada)
+
+**O primeiro fix (`4c06aea`) não resolvia o problema de fundo.**
+
+O Alembic não usava o `DATABASE_URL` fornecido pelo docker-compose. Motivo:
+- `alembic.ini` tinha `sqlalchemy.url` hardcoded para `localhost:5432/minutare_med`
+- `entrypoint.sh` exportava `DATABASE_URL` (linha 29) mas não o passava ao Alembic
+- `alembic upgrade head` usava a URL do `alembic.ini` → tentava conectar em `localhost` do container → falhava
+- `set -eu` no entrypoint.sh causava exit imediato → uvicorn nunca iniciava → healthcheck falhava
+
+**Fix real (commit `59ec773`):**
 ```bash
-docker compose logs api --tail=100
-docker exec minutare-api ls /app/entrypoint.sh
-docker exec minutare-api python -c "from app.main import app; print('OK')"
+# entrypoint.sh — pasar DATABASE_URL ao Alembic via -x flag
+alembic upgrade head -x "sqlalchemy.url=${DATABASE_URL}"
 ```
+
+### Arquivos alterados
+- `apps/api/alembic.ini` — URL placeholder (sobrescrita via -x)
+- `apps/api/entrypoint.sh` — `alembic upgrade head -x "sqlalchemy.url=${DATABASE_URL}"`
+
+### Ações de acompanhamento
+- Commit `4c06aea` (idempotência) mantido — proteção contra migrations duplicadas
+- Commit `59ec773` (URL correta) — causa raiz real
+- Ambos necessários para deploy confiável
