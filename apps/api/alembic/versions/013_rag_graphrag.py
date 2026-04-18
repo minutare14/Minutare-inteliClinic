@@ -42,10 +42,12 @@ def upgrade() -> None:
         [sa.text("((entity_signatures IS NOT NULL) AND (jsonb_array_length(entity_signatures) > 0))")],
         postgresql_using="btree",
         postgresql_where=sa.text("entity_signatures IS NOT NULL"),
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_rag_chunks_has_entities", table_name="rag_chunks")
+    op.drop_index("ix_rag_chunks_has_entities", table_name="rag_chunks", if_exists=True)
     op.drop_column("rag_chunks", "entity_signatures")
     op.drop_column("rag_chunks", "parent_chunk_id")
+    op.drop_constraint("fk_rag_chunks_parent", table_name="rag_chunks", type_="foreignkey", if_exists=True)

@@ -28,12 +28,14 @@ def upgrade() -> None:
     # Make NOT NULL after backfill
     op.alter_column("prompt_registry", "prompt_type", nullable=False)
     # Unique constraint: only one active version per clinic_id + prompt_type
+    # Use if_not_exists to survive repeated upgrade heads (idempotent)
     op.create_index(
         "ix_prompt_registry_clinic_prompt_active",
         "prompt_registry",
         ["clinic_id", "prompt_type", "active"],
         unique=False,
         postgresql_where=sa.text("active = true"),
+        if_not_exists=True,
     )
 
 

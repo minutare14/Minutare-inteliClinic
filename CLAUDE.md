@@ -13,6 +13,7 @@ Memoria viva tecnica. Registrar descobertas reais com separacao `Evidencia`, `In
 - `1.3 CRITICA`: Rotas operacionais sem auth. Corrigido: `Depends(get_current_user)` em todos os 5 arquivos de rota.
 - `1.4 HIGH`: StructuredLookup sem cobertura precos/horarios. Corrigido: `_lookup_hours()` e `_lookup_prices()` async.
 - `1.5 HIGH`: Prompt usava profissionais hardcoded. Corrigido: `orchestrator._inject_professionals_into_context()` injeta profissionais reais via `faro_brief`.
+- `1.6 HIGH`: Deploy `api` unhealthy — migrations `012` e `013` não-idempotentes. Corrigido: `if_not_exists=True` em `op.create_index()` + `if_exists=True` em `op.drop_index/drop_constraint`.
 
 **Fase 2 — Estabilizacao runtime:**
 - CLINIC_ID production guard: `model_validator` em `config.py` — falha se `APP_ENV=production` sem `CLINIC_ID`.

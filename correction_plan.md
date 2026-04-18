@@ -1071,3 +1071,81 @@ alembic downgrade 009
 | `apps/api/tests/test_rag.py` | Testes | 1.1 |
 
 **Total: 17 arquivos** (16 implementados + 1 migration nova)
+
+---
+
+## Seção — Incidente: Deploy `api` Unhealthy (2026-04-18)
+
+### Sintoma
+Container `api` ficava `unhealthy` imediatamente após iniciar. Healthcheck (`curl /health/live`) falhava.
+
+### Investigação
+
+**Causa raiz provável — migrations não-idempotentes:**
+Migrações `012` e `013` usam `op.create_index()` sem `if_not_exists=True`. Em um segundo `alembic upgrade head` (ex: rollback parcial seguido de upgrade, ou replay em staging), o PostgreSQL retorna `duplicate key` para indexes que já existem, e Alembic 默认treats isso como erro.
+
+**Migrações afetadas:**
+- `012`: `ix_prompt_registry_clinic_prompt_active` — índice parcial em `prompt_registry`
+- `013`: `ix_rag_chunks_has_entities` — índice parcial funcional em `rag_chunks`
+
+**Por que isso causa `unhealthy`:**
+`entrypoint.sh` executa `alembic upgrade head` como primeira etapa antes do uvicorn. Se a migration falhar, o container 非termina mas o processo de startup do Python pode ficar em estado inconsistente antes do healthcheck.
+
+### Fix aplicado
+
+**Migração `012`:**
+```python
+op.create_index(
+    "ix_prompt_registry_clinic_prompt_active",
+    "prompt_registry",
+    ["clinic_id", "prompt_type", "active"],
+    unique=False,
+    postgresql_where=sa.text("active = true"),
+    if_not_exists=True,  # <— adicionado
+)
+```
+
+**Migração `013`:**
+```python
+# upgrade()
+op.create_index(
+    "ix_rag_chunks_has_entities",
+    "rag_chunks",
+    [...],
+    postgresql_using="btree",
+    postgresql_where=sa.text("entity_signatures IS NOT NULL"),
+    if_not_exists=True,  # <— adicionado
+)
+
+# downgrade()
+op.drop_index("ix_rag_chunks_has_entities", table_name="rag_chunks", if_exists=True)
+op.drop_constraint("fk_rag_chunks_parent", table_name="rag_chunks", type_="foreignkey", if_exists=True)
+```
+
+### Arquivos alterados (2)
+- `apps/api/alembic/versions/012_prompt_registry_prompt_type.py`
+- `apps/api/alembic/versions/013_rag_graphrag.py`
+
+### Validação
+
+```
+# Reexecutar alembic upgrade head — deve ser idempotente
+alembic upgrade head
+# Segundo実行 — deve retornar "0 tables alembic_version" sem erro
+```
+
+### Hipótese restante (não confirmada sem logs reais)
+
+Se o problema persistir após as migrations idempotentes, as causas prováveis em ordem de probabilidade:
+
+1. **Startup timeout em DB operations no lifespan** — `ClinicSettings` ou `seed_default_admin` travando >15s. Mitigação: timeouts de 15s já aplicados.
+2. **Modelo de embedding carregado no startup** — `sentence-transformers` pode demorar 10-30s no primeiro request. Lazy loading já aplicado (`BOOTSTRAP_SEED_WITH_EMBEDDINGS=false`).
+3. **Erro de import em algum módulo** — `crm_router` ou `google_router` referencing non-existent services.飞
+4. **Memória insuficiente no container** — uvicorn worker killed pelo OOM killer.飞
+
+**Ação:** Se o container ainda ficar `unhealthy` após rebuild, coletar logs com:
+```bash
+docker compose logs api --tail=100
+docker exec minutare-api ls /app/entrypoint.sh
+docker exec minutare-api python -c "from app.main import app; print('OK')"
+```
