@@ -315,25 +315,35 @@ class DocumentRuntimeGraph:
             prompt_sources = dict(state.get("prompt_sources") or {})
             prompt_contents = dict(state.get("prompt_contents") or {})
 
-            query_rewrite_prompt = await self.admin_repo.get_active_prompt(
-                settings.clinic_id, agent="query_rewrite", prompt_type="query_rewrite"
-            )
-            document_grading_prompt = await self.admin_repo.get_active_prompt(
-                settings.clinic_id, agent="document_grading", prompt_type="document_grading"
-            )
-            # Load per-layer prompts for response builder (system_base, persona, behavior_rules, safety_rules)
-            system_base_prompt = await self.admin_repo.get_active_prompt(
-                settings.clinic_id, prompt_type="system_base"
-            )
-            persona_prompt = await self.admin_repo.get_active_prompt(
-                settings.clinic_id, prompt_type="persona"
-            )
-            behavior_rules_prompt = await self.admin_repo.get_active_prompt(
-                settings.clinic_id, prompt_type="behavior_rules"
-            )
-            safety_rules_prompt = await self.admin_repo.get_active_prompt(
-                settings.clinic_id, prompt_type="safety_rules"
-            )
+            try:
+                query_rewrite_prompt = await self.admin_repo.get_active_prompt(
+                    settings.clinic_id, agent="query_rewrite", prompt_type="query_rewrite"
+                )
+                document_grading_prompt = await self.admin_repo.get_active_prompt(
+                    settings.clinic_id, agent="document_grading", prompt_type="document_grading"
+                )
+                # Load per-layer prompts for response builder (system_base, persona, behavior_rules, safety_rules)
+                # agent="response_builder" keeps backward compatibility; prompt_type filters per layer
+                system_base_prompt = await self.admin_repo.get_active_prompt(
+                    settings.clinic_id, agent="response_builder", prompt_type="system_base"
+                )
+                persona_prompt = await self.admin_repo.get_active_prompt(
+                    settings.clinic_id, agent="response_builder", prompt_type="persona"
+                )
+                behavior_rules_prompt = await self.admin_repo.get_active_prompt(
+                    settings.clinic_id, agent="response_builder", prompt_type="behavior_rules"
+                )
+                safety_rules_prompt = await self.admin_repo.get_active_prompt(
+                    settings.clinic_id, agent="response_builder", prompt_type="safety_rules"
+                )
+            except Exception:
+                logger.exception("[GRAPH:_load_runtime_context] Falha ao carregar prompts do registry — usando defaults")
+                query_rewrite_prompt = None
+                document_grading_prompt = None
+                system_base_prompt = None
+                persona_prompt = None
+                behavior_rules_prompt = None
+                safety_rules_prompt = None
 
             if query_rewrite_prompt:
                 prompt_sources["query_rewrite"] = "db_registry"
@@ -368,6 +378,19 @@ class DocumentRuntimeGraph:
             return {
                 "prompt_sources": prompt_sources,
                 "prompt_contents": prompt_contents,
+                "langgraph_used": state.get("langgraph_used", False),
+            }
+        except Exception as exc:
+            logger.exception("[GRAPH:_load_runtime_context] Erro fatal: %s", exc)
+            if run is not None:
+                try:
+                    run.end(outputs={"error": str(exc)})
+                except Exception:
+                    pass
+            # Never let this node kill the entire pipeline — always return something
+            return {
+                "prompt_sources": {},
+                "prompt_contents": {},
                 "langgraph_used": state.get("langgraph_used", False),
             }
 

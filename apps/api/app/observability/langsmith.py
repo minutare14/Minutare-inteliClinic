@@ -56,6 +56,7 @@ async def trace_step(
         yield None
         return
 
+    run = None
     try:  # pragma: no cover - runtime integration
         async with trace(
             name,
@@ -67,5 +68,6 @@ async def trace_step(
         ) as run:
             yield run
     except Exception:
-        logger.exception("[TRACE] Failed to create LangSmith step '%s'", name)
+        # Never let LangSmith tracing crash the pipeline — log and continue
+        logger.exception("[TRACE] Exception in LangSmith step '%s'", name)
         yield None
