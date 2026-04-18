@@ -1078,9 +1078,10 @@ class AIOrchestrator:
         if state.professionals_injected:
             return
         try:
-            repo = AdminRepository(self.session)
-            profs = await repo.list_professionals(active_only=True)
-            names = [f"{p.name} ({p.specialty})" for p in profs if p.name]
+            from app.repositories.professional_repository import ProfessionalRepository
+            prof_repo = ProfessionalRepository(self.session)
+            profs = await prof_repo.list_active()
+            names = [f"{p.full_name} ({p.specialty})" for p in profs if p.full_name]
             if names:
                 state.faro_brief = state.faro_brief or {}
                 state.faro_brief["available_professionals"] = names
