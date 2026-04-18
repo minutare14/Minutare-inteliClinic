@@ -322,8 +322,6 @@ class DocumentRuntimeGraph:
                 document_grading_prompt = await self.admin_repo.get_active_prompt(
                     settings.clinic_id, agent="document_grading", prompt_type="document_grading"
                 )
-                # Load per-layer prompts for response builder (system_base, persona, behavior_rules, safety_rules)
-                # agent="response_builder" keeps backward compatibility; prompt_type filters per layer
                 system_base_prompt = await self.admin_repo.get_active_prompt(
                     settings.clinic_id, agent="response_builder", prompt_type="system_base"
                 )
@@ -337,7 +335,7 @@ class DocumentRuntimeGraph:
                     settings.clinic_id, agent="response_builder", prompt_type="safety_rules"
                 )
             except Exception:
-                logger.exception("[GRAPH:_load_runtime_context] Falha ao carregar prompts do registry — usando defaults")
+                logger.exception("[GRAPH:_load_runtime_context] Falha ao carregar prompts — usando defaults")
                 query_rewrite_prompt = None
                 document_grading_prompt = None
                 system_base_prompt = None
@@ -345,54 +343,48 @@ class DocumentRuntimeGraph:
                 behavior_rules_prompt = None
                 safety_rules_prompt = None
 
-            if query_rewrite_prompt:
-                prompt_sources["query_rewrite"] = "db_registry"
-                prompt_contents["query_rewrite"] = query_rewrite_prompt.content
-            else:
-                prompt_sources["query_rewrite"] = "default"
-                prompt_contents["query_rewrite"] = DEFAULT_QUERY_REWRITE_PROMPT
+            try:
+                if query_rewrite_prompt:
+                    prompt_sources["query_rewrite"] = "db_registry"
+                    prompt_contents["query_rewrite"] = query_rewrite_prompt.content
+                else:
+                    prompt_sources["query_rewrite"] = "default"
+                    prompt_contents["query_rewrite"] = DEFAULT_QUERY_REWRITE_PROMPT
 
-            if document_grading_prompt:
-                prompt_sources["document_grading"] = "db_registry"
-                prompt_contents["document_grading"] = document_grading_prompt.content
-            else:
-                prompt_sources["document_grading"] = "default"
-                prompt_contents["document_grading"] = DEFAULT_DOCUMENT_GRADING_PROMPT
+                if document_grading_prompt:
+                    prompt_sources["document_grading"] = "db_registry"
+                    prompt_contents["document_grading"] = document_grading_prompt.content
+                else:
+                    prompt_sources["document_grading"] = "default"
+                    prompt_contents["document_grading"] = DEFAULT_DOCUMENT_GRADING_PROMPT
 
-            # Load per-layer prompt overrides for system prompt construction
-            if system_base_prompt:
-                prompt_sources["system_base"] = "db_registry"
-                prompt_contents["system_base"] = system_base_prompt.content
-            if persona_prompt:
-                prompt_sources["persona"] = "db_registry"
-                prompt_contents["persona"] = persona_prompt.content
-            if behavior_rules_prompt:
-                prompt_sources["behavior_rules"] = "db_registry"
-                prompt_contents["behavior_rules"] = behavior_rules_prompt.content
-            if safety_rules_prompt:
-                prompt_sources["safety_rules"] = "db_registry"
-                prompt_contents["safety_rules"] = safety_rules_prompt.content
+                if system_base_prompt:
+                    prompt_sources["system_base"] = "db_registry"
+                    prompt_contents["system_base"] = system_base_prompt.content
+                if persona_prompt:
+                    prompt_sources["persona"] = "db_registry"
+                    prompt_contents["persona"] = persona_prompt.content
+                if behavior_rules_prompt:
+                    prompt_sources["behavior_rules"] = "db_registry"
+                    prompt_contents["behavior_rules"] = behavior_rules_prompt.content
+                if safety_rules_prompt:
+                    prompt_sources["safety_rules"] = "db_registry"
+                    prompt_contents["safety_rules"] = safety_rules_prompt.content
 
-            if run is not None:
-                run.end(outputs={"prompt_sources": prompt_sources})
-            return {
-                "prompt_sources": prompt_sources,
-                "prompt_contents": prompt_contents,
-                "langgraph_used": state.get("langgraph_used", False),
-            }
-        except Exception as exc:
-            logger.exception("[GRAPH:_load_runtime_context] Erro fatal: %s", exc)
-            if run is not None:
-                try:
-                    run.end(outputs={"error": str(exc)})
-                except Exception:
-                    pass
-            # Never let this node kill the entire pipeline — always return something
-            return {
-                "prompt_sources": {},
-                "prompt_contents": {},
-                "langgraph_used": state.get("langgraph_used", False),
-            }
+                if run is not None:
+                    run.end(outputs={"prompt_sources": prompt_sources})
+                return {
+                    "prompt_sources": prompt_sources,
+                    "prompt_contents": prompt_contents,
+                    "langgraph_used": state.get("langgraph_used", False),
+                }
+            except Exception as exc:
+                logger.exception("[GRAPH:_load_runtime_context] Erro fatal: %s", exc)
+                return {
+                    "prompt_sources": {},
+                    "prompt_contents": {},
+                    "langgraph_used": state.get("langgraph_used", False),
+                }
 
     async def _decision_router(self, state: DocumentGraphState) -> dict[str, Any]:
         route = "response_composer"
