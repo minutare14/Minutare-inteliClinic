@@ -1176,22 +1176,35 @@ O campo `entity_signatures: list[str] | None = Field(default=None)` não define 
 
 **Fix em `apps/api/app/models/rag.py`:**
 ```python
-# antes (quebra):
-entity_signatures: list[str] | None = Field(default=None)
-
-# depois (correto):
 entity_signatures: list[str] | None = Field(
     default=None,
     sa_column=Column(JSON),
 )
 ```
 
-### Arquivos alterados
+### Iterações de deploy (ciclo completo)
+
+| Tentativa | Commit | Erro | Status |
+|-----------|--------|------|--------|
+| 1 | `092ed3b` | `ValueError: <class 'list'>` em `rag.py` | ✅ Corrigido |
+| 2 | `29caa15` | `Multiple head revisions` — 011 com `down_revision=009` (deveria ser `010`) | ✅ Corrigido |
+| 3 | `e218da6` | `data type json has no default operator class for access method "btree"` — índice btree em JSON | ✅ Corrigido |
+| 4 | `a23b31e` | `function jsonb_array_length(json) does not exist` — cast jsonb necessário | ✅ Corrigido |
+| 5 | `a78004a` | `ImportError: cannot import name 'User' from 'app.models.admin'` | ✅ Corrigido |
+
+**Resultado final — deploy `a78004a`:**
+```
+[INFO] Migrations complete in 2s
+[INFO] API Startup completo em 0.5s. Aguardando conexões.
+INFO: Uvicorn running on http://0.0.0.0:8741
+docker ps: api (healthy), frontend (healthy), db (healthy), qdrant (healthy)
+curl /health/live: {"status":"ok","service":"minutare-med","kind":"liveness"}
+```
+
+### Arquivos alterados (sequência completa)
+- `apps/api/app/models/rag.py` — `entity_signatures` com `sa_column=Column(JSON)`
+- `apps/api/alembic/versions/011_rag_clinic_id.py` — `down_revision` de `"009"` para `"010"`
+- `apps/api/alembic/versions/013_rag_graphrag.py` — removeu índice btree em JSON
+- `apps/api/app/api/routes/dashboard.py` — `User` importado de `app.models.auth`
 - `apps/api/alembic.ini` — `sqlalchemy.url = ${DATABASE_URL}`
 - `apps/api/entrypoint.sh` — `alembic upgrade head` (sem `-x`)
-- `apps/api/app/models/rag.py` — `entity_signatures` com `sa_column=Column(JSON)`
-
-### Ações de acompanhamento
-- Commit `4c06aea` (idempotência) mantido
-- Commit `59ec773` (URL correta) mantido
-- Commit atual (models/rag.py) — causa raiz REAL do `unhealthy`
