@@ -1153,15 +1153,20 @@ O Alembic não usava o `DATABASE_URL` fornecido pelo docker-compose. Motivo:
 - `alembic upgrade head` usava a URL do `alembic.ini` → tentava conectar em `localhost` do container → falhava
 - `set -eu` no entrypoint.sh causava exit imediato → uvicorn nunca iniciava → healthcheck falhava
 
-**Fix real (commit `59ec773`):**
-```bash
-# entrypoint.sh — pasar DATABASE_URL ao Alembic via -x flag
-alembic upgrade head -x "sqlalchemy.url=${DATABASE_URL}"
+**Fix real (commit `59ec773` corrigido):**
+`alembic.ini` usa `sqlalchemy.url = ${DATABASE_URL}` — Alembic resolve a var de ambiente automaticamente.
+Entrypoint.sh volta a usar `alembic upgrade head` (sem `-x`).
+
+```ini
+# alembic.ini
+sqlalchemy.url = ${DATABASE_URL}
 ```
 
+O `-x` do commit anterior estava ERRADO — o Alembic usa `-x` para script variables, não para URL de banco.
+
 ### Arquivos alterados
-- `apps/api/alembic.ini` — URL placeholder (sobrescrita via -x)
-- `apps/api/entrypoint.sh` — `alembic upgrade head -x "sqlalchemy.url=${DATABASE_URL}"`
+- `apps/api/alembic.ini` — `sqlalchemy.url = ${DATABASE_URL}`
+- `apps/api/entrypoint.sh` — `alembic upgrade head` (sem `-x`)
 
 ### Ações de acompanhamento
 - Commit `4c06aea` (idempotência) mantido — proteção contra migrations duplicadas

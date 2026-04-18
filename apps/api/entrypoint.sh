@@ -71,8 +71,8 @@ PYEOF
 
 migration_started_at=$(date +%s)
 log "--> Running database migrations"
-# DATABASE_URL is exported above; Alembic uses -x to override alembic.ini's sqlalchemy.url
-alembic upgrade head -x "sqlalchemy.url=${DATABASE_URL}"
+# DATABASE_URL is exported above; alembic.ini uses ${DATABASE_URL} variable interpolation
+alembic upgrade head
 log "--> Migrations complete in $(( $(date +%s) - migration_started_at ))s"
 
 if bool_true "${BOOTSTRAP_SEED_ON_STARTUP}"; then
