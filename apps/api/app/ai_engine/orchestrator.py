@@ -785,17 +785,42 @@ class AIOrchestrator:
                 intent=Intent.AGENDAR, confidence=1.0, guardrail_action="allow",
             )
 
-        slot_number = self._extract_number(text)
+        # ── Conversational slot selection (no numbers required) ────────────────
+        # Accept: "o primeiro", "o de amanhã", "o do Dr. Carlos", "o de 20/04"
         slot_ids = pending.get("slot_ids", [])
+        slots_data = pending.get("slots_data", [])  # list of dicts with display info
+        selected_id = self._match_slot_by_text(text, slot_ids, slots_data)
 
-        if slot_number is None or slot_number < 1 or slot_number > len(slot_ids):
+        if selected_id is None:
+            # Try number as last resort
+            slot_number = self._extract_number(text)
+            if slot_number is not None and 1 <= slot_number <= len(slot_ids):
+                selected_id = uuid.UUID(slot_ids[slot_number - 1])
+
+        if selected_id is None:
+            # Format a helpful response using slot data (not numbers)
+            if slots_data:
+                display_lines = [f"{i}. {s.get('display', str(s))}" for i, s in enumerate(slots_data, 1)]
+                sample_display = slots_data[0].get("display", "opção") if slots_data else "opção"
+                # Build a natural list without numbers in the prompt
+                natural_lines = []
+                for s in slots_data:
+                    natural_lines.append(f"- {s.get('display', str(s))}")
+                suggestion = (
+                    "Não entendi sua preferência. Tenho estas opções disponíveis:\n\n"
+                    + "\n".join(natural_lines)
+                    + "\n\nPode me dizer qual prefere? "
+                    "Exemplo: 'o primeiro', 'o de amanhã', 'o do Dr. Carlos'."
+                )
+            else:
+                suggestion = (
+                    "Não entendi sua preferência. Pode me dizer qual horário prefere? "
+                    "Exemplo: 'o primeiro', 'o de amanhã às 10h', 'o do Dr. Carlos'."
+                )
             return EngineResponse(
-                text=f"Por favor, responda com um número de 1 a {len(slot_ids)}, "
-                     f"ou diga 'cancelar' para desistir.",
+                text=suggestion,
                 intent=Intent.CONFIRMACAO, confidence=1.0, guardrail_action="allow",
             )
-
-        selected_id = uuid.UUID(slot_ids[slot_number - 1])
 
         # ── Operational validity check: verify the professional is still active ──
         # This guards against the case where a professional was deactivated after
@@ -843,6 +868,10 @@ class AIOrchestrator:
                         await self._save_pending_action(conversation, {
                             "type": "select_slot",
                             "slot_ids": [str(s.slot_id) for s in alt.slots],
+                            "slots_data": [
+                                {"slot_id": str(s.slot_id), "display": s.display()}
+                                for s in alt.slots
+                            ],
                         })
                         contingency_text += (
                             f"Encontrei outras opções disponíveis em *{specialty}*:\n\n"
@@ -1007,6 +1036,10 @@ class AIOrchestrator:
             await self._save_pending_action(conversation, {
                 "type": "select_slot",
                 "slot_ids": [str(s.slot_id) for s in result.slots],
+                "slots_data": [
+                    {"slot_id": str(s.slot_id), "display": s.display()}
+                    for s in result.slots
+                ],
             })
         else:
             await self._save_pending_action(conversation, None)
@@ -1061,6 +1094,79 @@ class AIOrchestrator:
                 return num
         return None
 
+    def _match_slot_by_text(
+        self, text: str, slot_ids: list[str], slots_data: list[dict]
+    ) -> uuid.UUID | None:
+        """
+        Match user's textual slot preference against available slots.
+
+        Accepts natural language like:
+          "o primeiro", "o de amanhã", "o do Dr. Carlos", "o de 20/04"
+        Falls back to None if no match (then caller tries number extraction).
+        """
+        if not slots_data:
+            return None
+        text_lower = text.strip().lower()
+
+        # "o primeiro" / "primeiro" / "a primeira"
+        if any(w in text_lower for w in ("primeiro", "primeira", "primeira")):
+            return uuid.UUID(slots_data[0]["slot_id"])
+
+        # "o segundo", "o terceiro"...
+        ordinals = {
+            "primeiro": 0, "primeira": 0,
+            "segundo": 1, "segunda": 1,
+            "terceiro": 2, "terceira": 2,
+            "quarto": 3, "quarta": 3,
+            "quinto": 4, "quinta": 4,
+        }
+        for word, idx in ordinals.items():
+            if word in text_lower and idx < len(slots_data):
+                return uuid.UUID(slots_data[idx]["slot_id"])
+
+        # "o de {date}" — match by date
+        date_pattern = re.compile(r"\d{1,2}[/\-]\d{1,2}(?:[/\-]\d{2,4})?")
+        date_match = date_pattern.search(text)
+        if date_match:
+            for s in slots_data:
+                display = s.get("display", "")
+                if date_match.group() in display:
+                    return uuid.UUID(s["slot_id"])
+
+        # "o do Dr. {name}" or "o da Dra. {name}" — match by doctor name
+        doc_match = re.search(
+            r"(?:do|da|d[ao]s?)\s+(?:dr\.?|dra\.?)\s*(\w{2,})",
+            text_lower,
+        )
+        if doc_match:
+            doc_name_part = doc_match.group(1)
+            for s in slots_data:
+                display = s.get("display", "").lower()
+                if doc_name_part in display:
+                    return uuid.UUID(s["slot_id"])
+
+        # "o de {specialty}" — match by specialty
+        specialty_keywords = [
+            "cardiologia", "neurologia", "ortopedia", "pediatria",
+            "ginecologia", "dermatologia", "oftalmologia", "psiquiatria",
+        ]
+        for kw in specialty_keywords:
+            if kw in text_lower:
+                for s in slots_data:
+                    display = s.get("display", "").lower()
+                    if kw in display:
+                        return uuid.UUID(s["slot_id"])
+
+        # "o de amanhã" — match relative date
+        if "amanha" in text_lower or "amanhã" in text_lower:
+            from datetime import date, timedelta
+            tomorrow = (date.today() + timedelta(days=1)).strftime("%d/%m")
+            for s in slots_data:
+                if tomorrow in s.get("display", ""):
+                    return uuid.UUID(s["slot_id"])
+
+        return None
+
     # ─── Action execution (schedule_flow) ────────────────────────────────────
 
     async def _execute_action(
@@ -1086,6 +1192,10 @@ class AIOrchestrator:
                     await self._save_pending_action(conversation, {
                         "type": "select_slot",
                         "slot_ids": [str(s.slot_id) for s in result.slots],
+                        "slots_data": [
+                            {"slot_id": str(s.slot_id), "display": s.display()}
+                            for s in result.slots
+                        ],
                     })
                     return result.message
                 elif not date_str:
@@ -1151,6 +1261,10 @@ class AIOrchestrator:
                 await self._save_pending_action(conversation, {
                     "type": "select_slot",
                     "slot_ids": [str(s.slot_id) for s in result.slots],
+                    "slots_data": [
+                        {"slot_id": str(s.slot_id), "display": s.display()}
+                        for s in result.slots
+                    ],
                 })
             return result.message
 

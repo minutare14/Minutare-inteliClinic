@@ -120,11 +120,14 @@ class ScheduleActions:
         # Limit to 5
         all_slots = sorted(all_slots, key=lambda s: s.start_at)[:5]
 
-        # Format response
+        # Format response — conversational list, no numbered bullets
         lines = ["Encontrei os seguintes horários disponíveis:\n"]
-        for i, slot in enumerate(all_slots, 1):
-            lines.append(f"{i}️⃣ {slot.display()}")
-        lines.append("\nQual horário prefere? Responda com o número.")
+        for slot in all_slots:
+            lines.append(f"• {slot.display()}")
+        lines.append(
+            "\nPode me dizer qual prefere, pelo nome do médico, data ou horário. "
+            "Exemplo: 'o primeiro', 'o de amanhã às 10h', 'o do Dr. Carlos'."
+        )
 
         return ActionResult(
             success=True,
