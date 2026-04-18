@@ -30,18 +30,20 @@ def upgrade() -> None:
 
     # entity_signatures: JSON array of entity mentions for GraphRAG traversal
     # e.g. ["Dr. Carlos", "Cardiologia", "Consulta"] — enables filtering by entity
+    # NOTE: no index=True here — JSON columns can't use btree. The functional
+    # index below handles entity-filtered queries via jsonb_array_length.
     op.add_column(
         "rag_chunks",
-        sa.Column("entity_signatures", sa.JSON(), nullable=True, index=True),
+        sa.Column("entity_signatures", sa.JSON(), nullable=True),
     )
 
-    # Index on entity_signatures for fast entity-filtered retrieval
+    # Functional index on jsonb_array_length for fast entity-filtered retrieval
     op.create_index(
         "ix_rag_chunks_has_entities",
         "rag_chunks",
-        [sa.text("((entity_signatures IS NOT NULL) AND (jsonb_array_length(entity_signatures) > 0))")],
+        [sa.text("jsonb_array_length(entity_signatures)")],
         postgresql_using="btree",
-        postgresql_where=sa.text("entity_signatures IS NOT NULL"),
+        postgresql_where=sa.text("entity_signatures IS NOT NULL AND jsonb_array_length(entity_signatures) > 0"),
         if_not_exists=True,
     )
 
