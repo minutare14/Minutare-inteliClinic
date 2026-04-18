@@ -30,26 +30,16 @@ def upgrade() -> None:
 
     # entity_signatures: JSON array of entity mentions for GraphRAG traversal
     # e.g. ["Dr. Carlos", "Cardiologia", "Consulta"] — enables filtering by entity
-    # NOTE: no index=True here — JSON columns can't use btree. The functional
-    # index below handles entity-filtered queries via jsonb_array_length.
+    # NOTE: no index on entity_signatures JSON column — btree requires an operator
+    # class which JSON doesn't have. The column can be filtered with a seq scan
+    # or GIN index later if performance requires it.
     op.add_column(
         "rag_chunks",
         sa.Column("entity_signatures", sa.JSON(), nullable=True),
     )
 
-    # Functional index on jsonb_array_length for fast entity-filtered retrieval
-    op.create_index(
-        "ix_rag_chunks_has_entities",
-        "rag_chunks",
-        [sa.text("jsonb_array_length(entity_signatures)")],
-        postgresql_using="btree",
-        postgresql_where=sa.text("entity_signatures IS NOT NULL AND jsonb_array_length(entity_signatures) > 0"),
-        if_not_exists=True,
-    )
-
 
 def downgrade() -> None:
-    op.drop_index("ix_rag_chunks_has_entities", table_name="rag_chunks", if_exists=True)
     op.drop_column("rag_chunks", "entity_signatures")
     op.drop_column("rag_chunks", "parent_chunk_id")
     op.drop_constraint("fk_rag_chunks_parent", table_name="rag_chunks", type_="foreignkey", if_exists=True)
