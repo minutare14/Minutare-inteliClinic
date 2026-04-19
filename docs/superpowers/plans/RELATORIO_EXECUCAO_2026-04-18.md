@@ -1,9 +1,9 @@
 # Relatório Técnico: Pinecone + Document Upload — Execução Completa
 
-**Data:** 2026-04-18
-**Duração:** Sprint único
+**Data:** 2026-04-18 (atualizado 2026-04-19)
+**Duração:** Sprint único + bug fixes pós-deploy
 **Total de tarefas:** 18 (concluídas: 18)
-**Commits gerados:** 3 (`72b8610`, `9d0c24e`, `540d721`)
+**Commits gerados:** 6 (`72b8610`, `9d0c24e`, `540d721`, `71ce240`, `1513786`, `860560c`)
 
 ---
 
