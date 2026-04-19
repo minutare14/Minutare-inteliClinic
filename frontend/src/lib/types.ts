@@ -321,3 +321,23 @@ export interface PipelineTrace {
   steps: PipelineStep[];
   created_at: string;
 }
+
+// ── Document Upload ─────────────────────────────────────────────────────────────
+
+export interface DocumentSummary {
+  id: string;
+  title: string;
+  category: string;
+  status: string;
+  chunks_count: number;
+  extractions_count: number;
+  approved_count: number;
+  rejected_count: number;
+  created_at: string;
+}
+
+export interface DocumentListResponse {
+  items: DocumentSummary[];
+  total: number;
+  page: number;
+}
