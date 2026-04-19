@@ -8,6 +8,7 @@ export const INTENT_LABELS: Record<string, string> = {
   duvida_operacional: "Dúvida",
   falar_com_humano: "Humano",
   politicas: "Políticas",
+  listar_profissionais: "Profissionais",
   listar_especialidades: "Especialidades",
   saudacao: "Saudação",
   confirmacao: "Confirmação",

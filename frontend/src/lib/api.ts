@@ -54,7 +54,17 @@ async function fetchApi<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(url, { ...options, headers });
+  // AbortController timeout: 15 seconds max per request
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
+  let res: Response;
+  try {
+    res = await fetch(url, { ...options, headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
   const text = await res.text();
 
   if (res.status === 401) {
