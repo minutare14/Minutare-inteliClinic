@@ -53,9 +53,55 @@ _legacy_alias_map = {
     IntentAlias.REAGENDAMENTO: Intent.SCHEDULING,
 }
 
+# Direct mapping from RoutingIntent (Intent) enum member to LEGACY Intent string value.
+# e.g. RoutingIntent.LIST_PROFISSIONAIS -> "listar_profissionais" (legacy Intent value).
+_routing_intent_to_legacy_str = {
+    Intent.LIST_PROFISSIONAIS: "listar_profissionais",
+    Intent.LIST_SPECIALTIES: "listar_especialidades",
+    Intent.SCHEDULING: "agendar",
+    Intent.GREETING: "saudacao",
+    Intent.CONFIRMATION: "confirmacao",
+    Intent.GET_PROFESSIONAL_SPECIALTY: "listar_profissionais",
+    Intent.LIST_PROFISSIONAIS_BY_SPECIALTY: "listar_profissionais",
+    Intent.CHECK_AVAILABILITY: "desconhecida",
+    Intent.GET_CLINIC_INFO: "duvida_operacional",
+    Intent.UNKNOWN: "desconhecida",
+}
 
-def intent_alias_to_legacy(alias: IntentAlias) -> Intent:
-    return _legacy_alias_map.get(alias, Intent.UNKNOWN)
+
+def intent_alias_to_legacy(alias: IntentAlias | Intent) -> Intent:
+    """
+    Convert IntentAlias or RoutingIntent(Intent) to legacy Intent (from intent_router).
+
+    RoutingIntent values (SCHEDULING, GREETING, etc.) are converted using
+    _routing_intent_to_legacy_str mapping, then reconstructed as LegacyIntent.
+
+    IntentAlias values are looked up in _legacy_alias_map (returns RoutingIntent),
+    then further converted via _routing_intent_to_legacy_str.
+    """
+    # Late import to avoid circular dependency with intent_router.py
+    from app.ai_engine.intent_router import Intent as LegacyIntent
+
+    # Handle RoutingIntent (Intent) values directly — these are NOT IntentAlias members
+    if isinstance(alias, Intent) and alias not in IntentAlias._value2member_map_:
+        legacy_str = _routing_intent_to_legacy_str.get(alias)
+        if legacy_str:
+            try:
+                return LegacyIntent(legacy_str)
+            except ValueError:
+                pass
+        return LegacyIntent.DESCONHECIDA
+
+    # Handle IntentAlias — first look up in _legacy_alias_map (returns RoutingIntent)
+    routing_intent = _legacy_alias_map.get(alias)
+    if routing_intent:
+        legacy_str = _routing_intent_to_legacy_str.get(routing_intent)
+        if legacy_str:
+            try:
+                return LegacyIntent(legacy_str)
+            except ValueError:
+                pass
+    return LegacyIntent.DESCONHECIDA
 
 
 @dataclass
@@ -68,6 +114,7 @@ class RoutingDecision:
     tool_used: Optional[str] = None
     suggested_action: dict = field(default_factory=dict)
     reason: str = ""
+    greeting: bool = False
 
 
 # -------------------------------------------------------------------
@@ -174,6 +221,7 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
             source_of_truth="entity:greeting",
             suggested_action={"action": "greet", "args": {}},
             reason="Greeting entity detected, short text",
+            greeting=True,
         )
 
     # -----------------------------------------------------------------
