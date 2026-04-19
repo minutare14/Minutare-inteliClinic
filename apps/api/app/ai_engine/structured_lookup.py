@@ -130,8 +130,13 @@ def _is_structured_query(user_text: str, faro: FaroBrief) -> bool:
 
     if doctor_name:
         return True  # informational question about a specific doctor
-    if specialty and _matches_any(text_norm, _SPECIALTY_DOCTORS_KW):
+
+    # If a specialty entity was extracted, always route to structured lookup.
+    # This catches colloquial questions like "tem algum neuro?" / "tem ortopedista?"
+    # even without explicit "quais medicos" keywords.
+    if specialty:
         return True
+
     if _matches_any(text_norm, _INSURANCE_KW):
         return True
     if _matches_any(text_norm, _ADDRESS_KW):
