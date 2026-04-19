@@ -3,7 +3,7 @@
 **Data:** 2026-04-18 (atualizado 2026-04-19)
 **Duração:** Sprint único + bug fixes pós-deploy
 **Total de tarefas:** 18 (concluídas: 18)
-**Commits gerados:** 6 (`72b8610`, `9d0c24e`, `540d721`, `71ce240`, `1513786`, `860560c`)
+**Commits gerados:** 7 (`72b8610`, `9d0c24e`, `540d721`, `71ce240`, `1513786`, `860560c`, `b55ce92`)
 
 ---
 
@@ -742,6 +742,121 @@ curl -H "Authorization: Bearer <token>" "https://api.inteliclinic.minutarecore.s
 | climesa-qdrant | ✅ healthy |
 
 
+### Estado Final dos Containers
+
+| Container | Status |
+|----------|--------|
+| climesa-frontend | ✅ healthy |
+| climesa-api | ✅ healthy |
+| climesa-db | ✅ healthy |
+| climesa-qdrant | ✅ healthy |
+
 ---
 
-*Relatório gerado em 2026-04-18 — todas as 18 tarefas do plano Pinecone + Document Upload concluídas.*
+## 14. Bug de Sessão — Renovação Imediata + Container Duplicado (Recorrente)
+
+### Problema
+
+Sessão expirava imediatamente após login. O frontend mostrava "Sessão expirada — faça login novamente" logo após autenticação bem-sucedida.
+
+### Causa Raiz
+
+**Dois problemas simultâneos:**
+
+1. **Container API residual:** O container `testeinteliclinc-climesa-2q1y1a-api` (antigo, image `e837da68dc5be`) continuou sendo recriado automaticamente pelo Dokploy sempre que era removido manualmente. Este container usa o JWT secret default (`change-me-generate-strong-secret`) enquanto o novo container `climesa-api` usa `APP_SECRET_KEY='ASD14200'`. O Traefik fazia round-robin entre os dois containers.
+
+2. **Sem renovação de sessão:** Não existia mecanismo de renovação. O token dura 8h mas se o frontend limpasse a sessão por qualquer motivo (401 mal interpretado, localStorage corrompido, etc.), o usuário voltava pro login sem chance de recuperação.
+
+### Correções Backend
+
+**`POST /auth/refresh`** — novo endpoint que emite token fresco:
+```python
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(current_user: User = Depends(get_current_user)):
+    token = create_access_token(current_user)
+    return TokenResponse(access_token=token, role=current_user.role.value, full_name=current_user.full_name)
+```
+
+**Logs melhorados** — `user_id` em todos os auth events:
+```
+[AUTH] login_success user_id='8a044260-d52b-4ac6-81a8-d82868784371' email='emanoelmcedo@gmail.com' role='admin'
+[AUTH] refresh user_id='8a044260-d52b-4ac6-81a8-d82868784371' email='emanoelmcedo@gmail.com'
+```
+
+### Correções Frontend
+
+**`AuthProvider`** — heartbeat de 15 minutos:
+```typescript
+// refreshSession: called every 15min if user is active
+const refreshSession = useCallback(async () => {
+  const data = await refreshTokenApi();
+  saveToken(data.access_token);
+  setToken(data.access_token);
+}, []);
+
+useEffect(() => {
+  const interval = setInterval(async () => {
+    if (Date.now() - lastActiveRef.current < 15 * 60 * 1000) {
+      await refreshSession();
+    }
+  }, 15 * 60 * 1000);
+  return () => clearInterval(interval);
+}, [user, refreshSession]);
+```
+
+**Activity listeners** — click/keypress/scroll atualizam `lastActiveRef`:
+```typescript
+useEffect(() => {
+  const markActive = () => { lastActiveRef.current = Date.now(); };
+  window.addEventListener("click", markActive);
+  window.addEventListener("keypress", markActive);
+  window.addEventListener("scroll", markActive);
+  return () => { ... };
+}, []);
+```
+
+**`auth.ts`** — utilities de expiração:
+```typescript
+export function isTokenExpired(token: string): boolean { ... }
+export function getTokenExpiry(token: string): Date | null { ... }
+```
+
+### Estratégia de Renovação
+
+**Sliding session** — a cada interação do usuário (click/keypress/scroll), o `lastActiveRef` é atualizado. A cada 15 minutos, se o usuário esteve ativo nesse período, um novo token é emitido automaticamente. Isso mantém a sessão viva indefinidamente enquanto o usuário usa o painel.
+
+### Commit
+
+`b55ce92` — `fix(auth): add session refresh endpoint + frontend heartbeat renewal`
+
+### Verificação
+
+```bash
+# Login
+curl -X POST "https://api.inteliclinic.minutarecore.space/api/v1/auth/login" \
+  -d "username=emanoelmcedo@gmail.com&password=Asd14200"
+# → HTTP 200, token com sub='8a044260-d52b-4ac6-81a8-d82868784371'
+
+# /me
+curl -H "Authorization: Bearer <token>" \
+  "https://api.inteliclinic.minutarecore.space/api/v1/auth/me"
+# → HTTP 200, usuário correto
+
+# /refresh
+curl -X POST -H "Authorization: Bearer <token>" \
+  "https://api.inteliclinic.minutarecore.space/api/v1/auth/refresh"
+# → HTTP 200, novo token
+```
+
+### Estado Atual
+
+- Container residual removido (precisa monitorar para confirmar que não volta)
+- Novo token com `user_id` correto (`8a044260-d52b-4ac6-81a8-d82868784371`)
+- `/me` retorna 200 ✅
+- `/refresh` funciona ✅
+- Frontend com heartbeat de 15min ✅
+- Activity listeners mantêm sessão ativa ✅
+
+---
+
+*Relatório gerado em 2026-04-18 — atualizado 2026-04-19 com seções 11–14.*
