@@ -4,8 +4,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pinecone import Pinecone
-
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -26,9 +24,10 @@ class PineconeClient:
     def namespace(self) -> str:
         return settings.clinic_id
 
-    def _get_client(self) -> Pinecone:
+    def _get_client(self) -> Any:
         """Lazily initialize the Pinecone client."""
         if self._client is None:
+            from pinecone import Pinecone
             self._client = Pinecone(api_key=settings.pinecone_api_key)
         return self._client
 

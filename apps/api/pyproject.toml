@@ -57,6 +57,9 @@ dependencies = [
     # https://github.com/qdrant/qdrant
     "qdrant-client>=1.11.0",
 
+    # --- RAG — Pinecone vector store ---
+    "pinecone>=5.0.0",
+
     # --- Document parsing — Docling ---
     # PDF/DOCX parsing: https://github.com/docling-project/docling
     "docling>=2.0.0",
