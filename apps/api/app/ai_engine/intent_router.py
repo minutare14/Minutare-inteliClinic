@@ -157,6 +157,14 @@ INTENT_KEYWORDS: dict[str, list[str]] = {
         "quais medicos vocês têm", "quais medicos vcs",
         "lista dos medicos", "relação de profissionais",
         "quais dokter", "doktores", "doktor",
+        "quais especialidades", "quais as especialidades",
+        "qual especialidade", "qual a especialidade de",
+        "quais medicos existem", "liste os medicos",
+        "relação de medicos", "quais profissonais",
+        "qual a equipe", "equipe de profissionais",
+        "quem são os profissionais", "quais os medicos",
+        "qual a especialidade de cada", "especialidade de cada profissional",
+        "profissionais e especialidades", "quais medicos e especialidades",
     ],
     "listar_especialidades": [
         "especialidade", "especialidades", "especialista",
@@ -237,7 +245,7 @@ def _classify_intent(text_norm: str) -> tuple[Intent, float]:
 
     best_key = max(scores, key=scores.get)
     best_score = scores[best_key]
-    confidence = min(0.50 + best_score * 0.10, 0.99)
+    confidence = min(0.40 + best_score * 0.08, 0.99)
 
     try:
         intent = Intent(best_key)
