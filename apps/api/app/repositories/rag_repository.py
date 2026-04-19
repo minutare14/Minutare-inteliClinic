@@ -194,15 +194,35 @@ class RagRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one() > 0
 
-    async def list_documents(self, clinic_id: str, category: str | None = None) -> list[RagDocument]:
+    async def list_documents(
+        self,
+        clinic_id: str,
+        category: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[RagDocument]:
         stmt = select(RagDocument).where(RagDocument.clinic_id == clinic_id)
         if category:
             stmt = stmt.where(RagDocument.category == category)
-        stmt = stmt.order_by(RagDocument.created_at.desc())
+        if status:
+            stmt = stmt.where(RagDocument.status == status)
+        stmt = stmt.order_by(RagDocument.created_at.desc()).limit(limit).offset(offset)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_document(self, doc_id: uuid.UUID, clinic_id: str) -> RagDocument | None:
+    async def count_documents(
+        self, clinic_id: str, category: str | None = None, status: str | None = None
+    ) -> int:
+        stmt = select(func.count()).select_from(RagDocument).where(RagDocument.clinic_id == clinic_id)
+        if category:
+            stmt = stmt.where(RagDocument.category == category)
+        if status:
+            stmt = stmt.where(RagDocument.status == status)
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
+
+    async def get_document_by_id(self, doc_id: uuid.UUID, clinic_id: str) -> RagDocument | None:
         """Returns None if document belongs to a different clinic (isolation check)."""
         doc = await self.session.get(RagDocument, doc_id)
         if doc is None or doc.clinic_id != clinic_id:

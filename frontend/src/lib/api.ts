@@ -315,6 +315,75 @@ export const updateSpecialty = (id: string, data: Record<string, unknown>) =>
 export const deleteSpecialty = (id: string) =>
   fetchApi<void>(`${API_PREFIX}/admin/specialties/${id}`, { method: 'DELETE' });
 
+// Admin — Documents
+export interface DocumentUploadResponse {
+  document_id: string;
+  title: string;
+  category: string;
+  status: string;
+  chunks_created: number;
+  message: string;
+}
+
+export interface DocumentSummary {
+  id: string;
+  title: string;
+  category: string;
+  status: string;
+  chunks_count: number;
+  extractions_count: number;
+  approved_count: number;
+  rejected_count: number;
+  created_at: string;
+}
+
+export interface DocumentListResponse {
+  items: DocumentSummary[];
+  total: number;
+  page: number;
+}
+
+export const uploadDocument = async (
+  file: File,
+  category: string,
+  title: string | null,
+): Promise<DocumentUploadResponse> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('category', category);
+  if (title) formData.append('title', title);
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const response = await fetch(`${API_URL}${API_PREFIX}/admin/documents/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Upload failed' }));
+    throw new Error(err.detail || `HTTP ${response.status}`);
+  }
+  return response.json();
+};
+
+export const getDocuments = (params?: {
+  category?: string;
+  status?: string;
+  page?: number;
+  limit?: number;
+}) => {
+  const q = new URLSearchParams();
+  if (params?.category) q.set('category', params.category);
+  if (params?.status) q.set('status', params.status);
+  q.set('page', String(params?.page ?? 1));
+  q.set('limit', String(params?.limit ?? 20));
+  return fetchApi<DocumentListResponse>(`${API_PREFIX}/admin/documents?${q}`);
+};
+
+export const deleteDocument = (id: string) =>
+  fetchApi<void>(`${API_PREFIX}/admin/documents/${id}`, { method: 'DELETE' });
+
 // Admin — Audit/Logs (reuse existing audit endpoint)
 export const getAdminLogs = (limit = 50) =>
   fetchApi<AuditEvent[]>(`${API_PREFIX}/audit?limit=${limit}&offset=0`);

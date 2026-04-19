@@ -25,8 +25,10 @@ import {
 import type { ClinicSettings, InsuranceItem, PromptItem, ClinicSpecialty, AuditEvent } from "@/lib/types";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Card, CardBody } from "@/components/ui/card";
+import { DocumentUpload } from "@/components/admin/document-upload";
+import { DocumentList } from "@/components/admin/document-list";
 
-type Tab = "clinica" | "branding" | "ia" | "convenios" | "especialidades" | "integracoes" | "logs" | "prompts";
+type Tab = "clinica" | "branding" | "ia" | "convenios" | "especialidades" | "integracoes" | "logs" | "prompts" | "documentos";
 
 const EMBEDDING_MODEL_DEFAULTS: Record<string, string> = {
   local: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -43,6 +45,7 @@ export default function AdminPage() {
     { id: "ia", label: "IA & RAG" },
     { id: "convenios", label: "Convênios" },
     { id: "especialidades", label: "Especialidades" },
+    { id: "documentos", label: "Documentos" },
     { id: "integracoes", label: "Integrações" },
     { id: "logs", label: "Logs" },
     { id: "prompts", label: "Prompts" },
@@ -76,6 +79,7 @@ export default function AdminPage() {
       {tab === "ia" && <AITab />}
       {tab === "convenios" && <InsuranceTab />}
       {tab === "especialidades" && <SpecialtiesTab />}
+      {tab === "documentos" && <DocumentosTab />}
       {tab === "integracoes" && <IntegracoesTab />}
       {tab === "logs" && <LogsTab />}
       {tab === "prompts" && <PromptsTab />}
@@ -1041,6 +1045,29 @@ function IntegracoesTab() {
         <CardBody>
           <h2 className="text-sm font-semibold text-gray-800 mb-2">Google Calendar</h2>
           <p className="text-sm text-gray-400">Em breve</p>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+// ── Documentos Tab ───────────────────────────────────────────────────────────
+
+function DocumentosTab() {
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardBody>
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">Upload de Documento</h2>
+          <DocumentUpload onUploadComplete={() => setRefreshTrigger((n) => n + 1)} />
+        </CardBody>
+      </Card>
+      <Card>
+        <CardBody>
+          <h2 className="text-sm font-semibold text-gray-800 mb-4">Documentos</h2>
+          <DocumentList refreshTrigger={refreshTrigger} />
         </CardBody>
       </Card>
     </div>

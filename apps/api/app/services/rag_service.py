@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.pinecone_client import PineconeClient
 from app.services.reranker_service import build_reranker, RerankResult
 from app.core.embedding import (
     EmbeddingRuntimeConfig,
@@ -689,7 +690,7 @@ class RagService:
                     exc,
                 )
 
-            await self.repo.create_chunk(
+            chunk_record = await self.repo.create_chunk(
                 document_id=doc.id,
                 chunk_index=idx,
                 content=chunk_content,
@@ -701,6 +702,31 @@ class RagService:
                 parent_chunk_id=None,  # sibling linking done after loop
                 entity_signatures=self._extract_entity_signatures(chunk_content),
             )
+            # Dual-write: upsert to Pinecone if embedding available and Pinecone is configured
+            if embedding is not None:
+                pinecone = PineconeClient()
+                if pinecone.is_available():
+                    try:
+                        await pinecone.upsert_chunk(
+                            chunk_id=str(chunk_record.id),
+                            embedding=embedding,
+                            metadata={
+                                "clinic_id": clinic_id,
+                                "document_id": str(doc.id),
+                                "chunk_id": str(chunk_record.id),
+                                "category": category,
+                                "source": source_path or title,
+                                "version": "1",
+                                "created_at": chunk_record.created_at.isoformat() if chunk_record.created_at else "",
+                            },
+                        )
+                    except Exception as pine_exc:
+                        logger.warning(
+                            "[RAG:pinecone] upsert failed for document_id=%s chunk_index=%d: %s",
+                            doc.id,
+                            idx,
+                            pine_exc,
+                        )
             _log_chunk_status(
                 operation="ingest",
                 document_id=doc.id,
