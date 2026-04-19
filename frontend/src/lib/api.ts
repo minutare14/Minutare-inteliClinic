@@ -438,6 +438,16 @@ export async function getMeApi(token: string): Promise<AuthUserResponse> {
   return fetchApi<AuthUserResponse>(`${API_PREFIX}/auth/me`, {}, token);
 }
 
+// ── Auth mutations ─────────────────────────────────────────────────────────────
+
+/** Issue a fresh token, extending the session. Call on every authenticated interaction. */
+export const refreshToken = () =>
+  fetchApi<LoginResponse>(`${API_PREFIX}/auth/refresh`, { method: "POST" });
+
+/** Logout — client should discard the token after this. */
+export const logoutApi = () =>
+  fetchApi<{ message: string }>(`${API_PREFIX}/auth/logout`, { method: "POST" });
+
 // ── CRM ───────────────────────────────────────────────────────────────────────
 
 export const getCrmLeads = (stage?: string) => {

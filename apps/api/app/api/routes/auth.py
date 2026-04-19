@@ -104,7 +104,10 @@ async def login(
     await session.commit()
 
     token = create_access_token(user)
-    logger.info("[AUTH] login_success email='%s' role='%s'", user.email, user.role.value)
+    logger.info(
+        "[AUTH] login_success user_id='%s' email='%s' role='%s'",
+        str(user.id), user.email, user.role.value,
+    )
 
     return TokenResponse(
         access_token=token,
@@ -129,8 +132,25 @@ async def logout(
     Logout — stateless JWT, so client should discard the token.
     This endpoint exists for audit logging purposes.
     """
-    logger.info("[AUTH] logout email='%s'", current_user.email)
+    logger.info("[AUTH] logout user_id='%s' email='%s'", str(current_user.id), current_user.email)
     return {"message": "Logout realizado com sucesso"}
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """
+    Issue a fresh access token, extending the session.
+    Called by the frontend on each authenticated interaction to keep the session alive.
+    """
+    logger.info("[AUTH] refresh user_id='%s' email='%s'", str(current_user.id), current_user.email)
+    token = create_access_token(current_user)
+    return TokenResponse(
+        access_token=token,
+        role=current_user.role.value,
+        full_name=current_user.full_name,
+    )
 
 
 # ── User management (admin only) ──────────────────────────────────────────────
