@@ -53,6 +53,14 @@ def verify_password(plain: str, hashed: str) -> bool:
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
+def _get_jwt_secret() -> str:
+    """Return jwt_secret_key, falling back to app_secret_key if empty."""
+    key = settings.jwt_secret_key
+    if key:
+        return key
+    return settings.app_secret_key
+
+
 def create_access_token(user: User) -> str:
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.jwt_access_token_expire_minutes
@@ -65,7 +73,7 @@ def create_access_token(user: User) -> str:
     }
     return jwt.encode(
         payload,
-        settings.jwt_secret_key,
+        _get_jwt_secret(),
         algorithm=settings.jwt_algorithm,
     )
 
@@ -73,7 +81,7 @@ def create_access_token(user: User) -> str:
 def decode_token(token: str) -> dict:
     return jwt.decode(
         token,
-        settings.jwt_secret_key,
+        _get_jwt_secret(),
         algorithms=[settings.jwt_algorithm],
     )
 

@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # ── Auth / JWT ────────────────────────────────────────────────────────────
     # JWT secret — MUST be set to a strong random value in production.
     # Generate: python -c "import secrets; print(secrets.token_hex(32))"
-    jwt_secret_key: str = "change-me-generate-strong-secret"
+    jwt_secret_key: str = ""  # falls back to app_secret_key if not set
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 480  # 8 hours
 
