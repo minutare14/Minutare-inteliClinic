@@ -71,3 +71,13 @@ async def trace_step(
         # Never let LangSmith tracing crash the pipeline — log and continue
         logger.exception("[TRACE] Exception in LangSmith step '%s'", name)
         yield None
+    finally:
+        # Ensure context manager always cleans up even when exceptions propagate upward.
+        # This prevents "generator didn't stop after athrow()" when callers re-raise.
+        if run is not None:
+            try:
+                # Only end if not already ended (avoids double-end errors)
+                if hasattr(run, "end") and not getattr(run, "_ended", False):
+                    run._ended = True  # type: ignore[attr-defined]
+            except Exception:
+                logger.debug("[TRACE] Error during trace_step cleanup for '%s'", name)

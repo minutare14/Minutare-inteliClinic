@@ -214,6 +214,13 @@ class DocumentRuntimeGraph:
             "audit_payload": {},
         }
 
+        logger.info(
+            "[GRAPH:RUN] user_text=%r langgraph_enabled=%s LANGGRAPH_AVAILABLE=%s",
+            user_text,
+            settings.langgraph_runtime_enabled,
+            LANGGRAPH_AVAILABLE,
+        )
+
         if self._compiled_graph is not None and settings.langgraph_runtime_enabled:
             state = await self._compiled_graph.ainvoke(initial_state)
         else:
@@ -669,69 +676,93 @@ class DocumentRuntimeGraph:
             },
             tags=["response_composer"],
         ) as run:
-            if state.get("response_text"):
-                text = state["response_text"]
-                mode = state.get("mode") or "template"
-                fallback_used = mode in {"clarification", "handoff"}
-            elif state.get("prefilled_response"):
-                text = state["prefilled_response"] or ""
-                mode = state.get("prefilled_mode") or "template"
-                fallback_used = False
-            elif state.get("route") == "rag_retrieval":
-                final_rows = state.get("final_candidates") or state.get("approved_candidates") or []
-                if final_rows:
-                    rag_results = [
-                        {
-                            "content": row.get("content", ""),
-                            "document_title": row.get("document_title", "Documento"),
-                            "score": float(row.get("score", 0.0)),
-                        }
-                        for row in final_rows
-                    ]
+            # Initialize llm_metrics upfront — every branch must leave it defined
+            llm_metrics: dict[str, Any] | None = None
+            llm_model: str | None = None
+            llm_latency_ms: float = 0.0
+            text: str = ""
+            mode: str = "unknown"
+            fallback_used: bool = True
+
+            try:
+                if state.get("response_text"):
+                    text = state["response_text"]
+                    mode = state.get("mode") or "template"
+                    fallback_used = mode in {"clarification", "handoff"}
+                elif state.get("prefilled_response"):
+                    text = state["prefilled_response"] or ""
+                    mode = state.get("prefilled_mode") or "template"
+                    fallback_used = False
+                elif state.get("route") == "rag_retrieval":
+                    final_rows = state.get("final_candidates") or state.get("approved_candidates") or []
+                    if final_rows:
+                        rag_results = [
+                            {
+                                "content": row.get("content", ""),
+                                "document_title": row.get("document_title", "Documento"),
+                                "score": float(row.get("score", 0.0)),
+                            }
+                            for row in final_rows
+                        ]
+                        text, used_llm, llm_metrics = await generate_response(
+                            context=state["context"],
+                            user_text=state["user_text"],
+                            faro=state["faro"],
+                            rag_results=rag_results,
+                            clinic_name=state.get("clinic_name"),
+                            chatbot_name=state.get("chatbot_name"),
+                            custom_system_prompt=state.get("custom_system_prompt"),
+                            insurance_context=state.get("insurance_context"),
+                            faro_brief=state.get("faro_brief"),
+                        )
+                        mode = "rag_llm" if used_llm else "rag_template"
+                        fallback_used = False
+                    else:
+                        text = SAFE_RAG_FALLBACK
+                        mode = "rag_safe_fallback"
+                        fallback_used = True
+                        state["route"] = "clarification_flow"
+                        state["source_of_truth"] = "template"
+                else:
                     text, used_llm, llm_metrics = await generate_response(
                         context=state["context"],
                         user_text=state["user_text"],
                         faro=state["faro"],
-                        rag_results=rag_results,
+                        rag_results=None,
                         clinic_name=state.get("clinic_name"),
                         chatbot_name=state.get("chatbot_name"),
                         custom_system_prompt=state.get("custom_system_prompt"),
                         insurance_context=state.get("insurance_context"),
                         faro_brief=state.get("faro_brief"),
                     )
-                    mode = "rag_llm" if used_llm else "rag_template"
-                    fallback_used = False
-                else:
-                    text = SAFE_RAG_FALLBACK
-                    mode = "rag_safe_fallback"
-                    fallback_used = True
-                    state["route"] = "clarification_flow"
-                    state["source_of_truth"] = "template"
-                    llm_metrics = None
-            else:
-                text, used_llm, llm_metrics = await generate_response(
-                    context=state["context"],
-                    user_text=state["user_text"],
-                    faro=state["faro"],
-                    rag_results=None,
-                    clinic_name=state.get("clinic_name"),
-                    chatbot_name=state.get("chatbot_name"),
-                    custom_system_prompt=state.get("custom_system_prompt"),
-                    insurance_context=state.get("insurance_context"),
-                    faro_brief=state.get("faro_brief"),
-                )
-                mode = "llm" if used_llm else "template"
-                fallback_used = not used_llm
+                    mode = "llm" if used_llm else "template"
+                    fallback_used = not used_llm
 
-            # Extract LLM telemetry for audit trail
-            llm_model = None
-            llm_latency_ms = 0.0
-            if llm_metrics:
-                llm_model = llm_metrics.get("model")
-                llm_latency_ms = float(llm_metrics.get("elapsed_ms", 0.0))
+                # Extract LLM telemetry for audit trail
+                if llm_metrics:
+                    llm_model = llm_metrics.get("model")
+                    llm_latency_ms = float(llm_metrics.get("elapsed_ms", 0.0))
+
+            except Exception:
+                logger.exception("[RESPONSE_COMPOSER] Exceção em generate_response — retornando fallback seguro")
+                text = SAFE_RAG_FALLBACK
+                mode = "safe_fallback"
+                fallback_used = True
+                llm_metrics = None
+                llm_model = None
+                llm_latency_ms = 0.0
+
+            logger.info(
+                "[RESPONSE_COMPOSER] route=%s mode=%s fallback=%s llm_model=%s llm_latency_ms=%s",
+                state.get("route"), mode, fallback_used, llm_model, llm_latency_ms,
+            )
 
             if run is not None:
-                run.end(outputs={"mode": mode, "response_preview": text[:240]})
+                try:
+                    run.end(outputs={"mode": mode, "response_preview": text[:240]})
+                except Exception:
+                    logger.exception("[RESPONSE_COMPOSER] Falha ao encerrar run do LangSmith")
+
             return {
                 "response_text": text,
                 "mode": mode,

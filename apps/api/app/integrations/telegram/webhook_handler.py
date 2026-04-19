@@ -46,8 +46,8 @@ async def handle_telegram_update(update: TelegramUpdate, session: AsyncSession) 
         return
 
     logger.info(
-        "[TELEGRAM] Mensagem recebida | user=%s chat=%s texto=%r",
-        user_id, chat_id, text[:120],
+        "[TELEGRAM:INBOUND] update_id=%d user=%s chat=%s text=%r",
+        update.update_id, user_id, chat_id, text[:120],
     )
 
     # 1. Get or create patient

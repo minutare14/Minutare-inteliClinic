@@ -434,6 +434,12 @@ class AIOrchestrator:
         # directly from structured database records (professionals, insurance, address).
         # This prevents questions about specific doctors returning generic lists.
         #
+        logger.info(
+            "[ORCHESTRATOR:PRE_LOOKUP] user_text=%r active_query=%s route=%s",
+            user_text,
+            state.active_query if hasattr(state, 'active_query') else None,
+            state.route,
+        )
         lookup_result: LookupResult | None = None
         try:
             lookup_result = await self.structured_lookup.lookup(
@@ -521,8 +527,11 @@ class AIOrchestrator:
 
         # ══ NODE 8: rag_retrieval + response_composer ════════════════════════
         logger.info(
-            "[NODE:response_composer] intent=%s prompt_source=%s insurance=%s",
-            faro.intent.value, state.prompt_source, bool(insurance_context),
+            "[ORCHESTRATOR:PRE_GRAPH] user_text=%r context.history_len=%d route=%s langgraph=%s",
+            user_text,
+            len(context.history) if context else 0,
+            state.route,
+            state.langgraph_used,
         )
         # Inject real professionals into context so composer uses live data
         await self._inject_professionals_into_context(state, patient)
