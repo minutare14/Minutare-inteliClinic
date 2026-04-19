@@ -137,6 +137,7 @@ from app.api.routes.admin import router as admin_router  # noqa: E402
 from app.api.routes.crm import router as crm_router  # noqa: E402
 from app.api.routes.google import router as google_router  # noqa: E402
 from app.api.routes.document_upload import router as document_upload_router  # noqa: E402
+from app.api.routes.extractions import router as extractions_router  # noqa: E402
 
 API_PREFIX = "/api/v1"
 
@@ -155,3 +156,4 @@ app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(crm_router, prefix=API_PREFIX)
 app.include_router(google_router, prefix=API_PREFIX)
 app.include_router(document_upload_router, prefix=API_PREFIX)
+app.include_router(extractions_router, prefix=API_PREFIX)
