@@ -77,6 +77,11 @@ def main():
         action="store_true",
         help="Mostra o que seria feito sem executar",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Executa sem pedir confirmação (usar em produção/vps)",
+    )
     args = parser.parse_args()
 
     if args.dry_run:
@@ -89,15 +94,18 @@ def main():
         )
         return
 
-    logger.info("=" * 60)
-    logger.info("  ATENÇÃO: este script IRREVOGAVELMENTE apaga dados!")
-    logger.info("  - Todas as mensagens e conversas do bot")
-    logger.info("  - Todos os traces do LangSmith")
-    logger.info("=" * 60)
-    confirm = input("\nDigite 'SIM' para confirmar: ")
-    if confirm != "SIM":
-        logger.info("Abortado pelo usuário.")
-        return
+    if not args.force:
+        logger.info("=" * 60)
+        logger.info("  ATENÇÃO: este script IRREVOGAVELMENTE apaga dados!")
+        logger.info("  - Todas as mensagens e conversas do bot")
+        logger.info("  - Todos os traces do LangSmith")
+        logger.info("=" * 60)
+        confirm = input("\nDigite 'SIM' para confirmar: ")
+        if confirm != "SIM":
+            logger.info("Abortado pelo usuário.")
+            return
+    else:
+        logger.info("[FORCE] Executando sem confirmação (--force detectado)")
 
     clear_langsmith()
     asyncio.run(clear_database())
