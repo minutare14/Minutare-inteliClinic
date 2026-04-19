@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { useAuth } from "@/context/auth-context";
@@ -11,15 +11,15 @@ const PUBLIC_PATHS = ["/login"];
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   const pathname = usePathname();
-  const router = useRouter();
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname?.startsWith(p));
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated && !isPublic) {
-      router.replace("/login");
+      // Use window.location for redirect to avoid Next.js router instability
+      window.location.href = "/login";
     }
-  }, [isLoading, isAuthenticated, isPublic, router]);
+  }, [isLoading, isAuthenticated, isPublic]);
 
   // Login page — no sidebar/topbar wrapper
   if (isPublic) {

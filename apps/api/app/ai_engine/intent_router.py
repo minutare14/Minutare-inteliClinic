@@ -25,6 +25,7 @@ class Intent(str, Enum):
     DUVIDA_OPERACIONAL = "duvida_operacional"
     FALAR_COM_HUMANO = "falar_com_humano"
     POLITICAS = "politicas"
+    LISTAR_PROFISSIONAIS = "listar_profissionais"
     LISTAR_ESPECIALIDADES = "listar_especialidades"
     SAUDACAO = "saudacao"
     CONFIRMACAO = "confirmacao"
@@ -144,9 +145,23 @@ INTENT_KEYWORDS: dict[str, list[str]] = {
         "politica", "regra", "regras", "norma",
         "cancelamento", "antecedencia", "documento",
     ],
+    "listar_profissionais": [
+        "quais medicos", "quais medicas", "quais medicos vocês tem",
+        "quais profissionais", "qual medico", "qual médica", "qual médico",
+        "que medico", "que médicos", "que profissionais",
+        "me diz os medicos", "lista de medicos", "relação de medicos",
+        "profissionais disponíveis", "médicos ativos", "equipe médica",
+        "quem são os medicos", "quais doctors", "lista médicos",
+        "qual a especialidade", "especialidade de cada",
+        "quem atende", "quem são vocês", "time da clinica",
+        "quais medicos vocês têm", "quais medicos vcs",
+        "lista dos medicos", "relação de profissionais",
+        "quais dokter", "doktores", "doktor",
+    ],
     "listar_especialidades": [
         "especialidade", "especialidades", "especialista",
-        "qual medico", "quais medicos", "que tipo", "areas",
+        "quais areas", "que areas", "areas de atendimento",
+        "disponiveis na clinica",
     ],
     "duvida_operacional": [
         "horario", "funcionamento", "endereco", "telefone",
@@ -365,6 +380,8 @@ def _suggest_actions(intent: Intent, entities: dict) -> list[dict]:
                 "args": {k: v for k, v in entities.items() if k in ("date", "time", "doctor_name")},
                 "risk": "read",
             })
+    elif intent == Intent.LIST_PROFISSIONAIS:
+        suggestions.append({"action": "list_professionals", "args": {}, "risk": "read"})
     elif intent == Intent.LISTAR_ESPECIALIDADES:
         suggestions.append({"action": "list_specialties", "args": {}, "risk": "read"})
     elif intent == Intent.POLITICAS:
@@ -409,23 +426,19 @@ def analyze(text: str, specialties_override: list[str] | None = None) -> FaroBri
 
     # 4b. Specialty detected — decide between informational and scheduling intent.
     #
-    # BUG FIX: previously, any specialty + DESCONHECIDA was forced to AGENDAR.
-    # This caused "tem neurologista?" to search slots instead of listing doctors.
+    # "tem neuro?" / "vocês tem cardiologista?" → LIST_PROFISSIONAIS (asking about available doctors)
+    # "quais especialidades vocês oferecem?" → LISTAR_ESPECIALIDADES
+    # AGENDAR + specialty → boost confidence (already correctly classified)
     #
-    # Rule:
-    #   DESCONHECIDA + specialty → LISTAR_ESPECIALIDADES (informational)
-    #     e.g. "tem neurologista?", "vocês tem cardiologista?", "existe ortopedista?"
-    #   AGENDAR already classified + specialty → boost confidence (unchanged)
-    #
-    # AGENDAR is only correct when scheduling keywords are present (already scored above).
     if entities.get("specialty"):
         if intent == Intent.DESCONHECIDA:
-            # No scheduling verb found — user is asking about specialty existence or doctor listing.
-            intent = Intent.LISTAR_ESPECIALIDADES
+            # "tem neuro?", "vocês tem cardiologista?", "tem ortopedista?"
+            # → user wants to know which doctors are available in that specialty
+            intent = Intent.LIST_PROFISSIONAIS
             confidence = 0.80
         elif intent == Intent.AGENDAR:
             confidence = min(confidence + 0.10, 0.99)
-        elif intent == Intent.LISTAR_ESPECIALIDADES:
+        elif intent == Intent.LIST_PROFISSIONAIS:
             confidence = min(confidence + 0.10, 0.99)
 
     # 5. Missing fields

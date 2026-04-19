@@ -24,7 +24,7 @@ function StatusIndicator({ label, ok }: { label: string; ok: boolean | null }) {
 }
 
 export default function DashboardPage() {
-  const { data: summary, loading } = useFetch(() => getDashboardSummary());
+  const { data: summary, loading, error } = useFetch(() => getDashboardSummary());
   const { data: apiHealth } = useFetch(() =>
     getHealth()
       .then(() => true)
@@ -37,6 +37,18 @@ export default function DashboardPage() {
   );
 
   if (loading) return <LoadingState />;
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-4">
+          <span className="text-2xl">⚠️</span>
+        </div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">Erro ao carregar dashboard</h3>
+        <p className="text-sm text-gray-500 mb-4">{error}</p>
+        <p className="text-xs text-gray-400">Verifique se o backend está acessível e o token de acesso é válido.</p>
+      </div>
+    );
+  }
 
   return (
     <div>

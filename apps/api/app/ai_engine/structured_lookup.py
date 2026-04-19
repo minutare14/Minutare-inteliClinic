@@ -188,12 +188,19 @@ class StructuredLookup:
       8. Prices (from ServiceRepository — NOT RAG)
     """
 
+    # Intents that are listing requests (handled by StructuredLookup)
+    _LISTING_INTENTS = {
+        Intent.LISTAR_PROFISSIONAIS,
+        Intent.LISTAR_ESPECIALIDADES,
+    }
+
     def __init__(self, session, rag_svc: "RagService | None" = None) -> None:
         from app.repositories.professional_repository import ProfessionalRepository
         from app.repositories.service_repository import ServiceRepository
         self.prof_repo = ProfessionalRepository(session)
         self.svc_repo = ServiceRepository(session)
         self.rag_svc = rag_svc
+        self._session = session
 
     async def lookup(
         self,
@@ -238,9 +245,11 @@ class StructuredLookup:
         # ── Priority 2: Which doctors attend a specialty ──────────────────────
         # "Quais médicos atendem ortopedia?"
         # "Tem médico de cardiologia?"
+        # "tem neuro?" (specialty detected + LIST_PROFISSIONAIS)
         if specialty and (
             _matches_any(text_norm, _SPECIALTY_DOCTORS_KW)
             or faro.intent == Intent.LISTAR_ESPECIALIDADES
+            or faro.intent == Intent.LIST_PROFISSIONAIS
         ):
             result = await self._lookup_specialty_doctors(specialty)
             if result.answered:
@@ -255,7 +264,14 @@ class StructuredLookup:
             if result.answered:
                 return result
 
-        # ── Priority 3: Insurance question ────────────────────────────────────
+        # ── Priority 3: List ALL professionals (no filter) ────────────────────
+        # "quais médicos vocês têm?", "liste os profissionais"
+        if faro.intent == Intent.LISTAR_PROFISSIONAIS:
+            result = await self._lookup_all_professionals()
+            if result.answered:
+                return result
+
+        # ── Priority 4: Insurance question ────────────────────────────────────
         # "Quais convênios vocês aceitam?"
         # "Aceitam Unimed?"
         if _matches_any(text_norm, _INSURANCE_KW):
@@ -374,6 +390,39 @@ class StructuredLookup:
                 lines.append(f"• {p.full_name}")
             text = "\n".join(lines)
 
+        return LookupResult(answered=True, text=text, source="professionals")
+
+    async def _lookup_all_professionals(self) -> LookupResult:
+        """List ALL active professionals with name and specialty."""
+        try:
+            profs = await self.prof_repo.list_active()
+        except Exception:
+            logger.exception("[STRUCTURED] Falha ao buscar profissionais (list_all)")
+            return LookupResult(answered=False, text="", source="professionals")
+
+        logger.info(
+            "[STRUCTURED] list_professionals: returned=%d",
+            len(profs),
+        )
+
+        if not profs:
+            return LookupResult(
+                answered=True,
+                text="No momento não há profissionais ativos cadastrados.",
+                source="professionals",
+            )
+
+        # Group by specialty for cleaner output
+        by_specialty: dict[str, list] = {}
+        for p in profs:
+            by_specialty.setdefault(p.specialty, []).append(p.full_name)
+
+        lines = ["Profissionais disponíveis:\n"]
+        for specialty, names in sorted(by_specialty.items()):
+            names_str = ", ".join(names)
+            lines.append(f"• *{specialty}*: {names_str}")
+
+        text = "\n".join(lines)
         return LookupResult(answered=True, text=text, source="professionals")
 
     def _lookup_insurance(self, insurance_items: list) -> LookupResult:

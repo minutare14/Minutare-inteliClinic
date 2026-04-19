@@ -1314,12 +1314,12 @@ class AIOrchestrator:
         if faro.intent == Intent.CONFIRMACAO:
             return None
 
-        if faro.intent == Intent.LISTAR_ESPECIALIDADES:
+        # ── LIST_PROFISSIONAIS: "quais médicos vocês têm?" / "quem atende neurologia?" ──
+        if faro.intent == Intent.LIST_PROFISSIONAIS:
             doctor_name = entities.get("doctor_name")
             specialty_filter = entities.get("specialty")
 
-            # If a specific doctor was mentioned, structured_lookup should have already
-            # handled this. This is a safety net for cases that fall through.
+            # Specific doctor mentioned → what is their specialty?
             if doctor_name:
                 profs = await self.schedule_actions._find_professionals(None, doctor_name)
                 if profs:
@@ -1327,17 +1327,49 @@ class AIOrchestrator:
                     return f"{p.full_name} atende na especialidade de *{p.specialty}*."
                 return f"Não encontrei um profissional com o nome '{doctor_name}'."
 
-            # If a specialty filter was given, list doctors in that specialty
+            # Specialty filter → list doctors IN that specialty
             if specialty_filter:
                 profs = await self.schedule_actions._find_professionals(specialty_filter, None)
                 if profs:
                     lines = [f"Profissionais que atendem *{specialty_filter}*:\n"]
                     for p in profs:
-                        lines.append(f"  • {p.full_name}")
+                        lines.append(f"  • {p.full_name} — {p.specialty}")
                     lines.append("\nQual médico prefere para o agendamento?")
                     return "\n".join(lines)
+                return (
+                    f"No momento não temos profissionais ativos em *{specialty_filter}*. "
+                    "Posso listar as especialidades disponíveis se preferir."
+                )
 
-            # Generic: list all available specialties
+            # No filter → list ALL active professionals with their specialties
+            profs = await self.schedule_actions._find_professionals(None, None)
+            if profs:
+                lines = ["Profissionais ativos na clínica:\n"]
+                for p in profs:
+                    lines.append(f"  • {p.full_name} — {p.specialty}")
+                lines.append("\nQual profissional prefere para o agendamento?")
+                return "\n".join(lines)
+            return (
+                "No momento não há profissionais ativos cadastrados no sistema. "
+                "Por favor, entre em contato com a recepção."
+            )
+
+        # ── LISTAR_ESPECIALIDADES: "quais especialidades vocês oferecem?" ──
+        if faro.intent == Intent.LISTAR_ESPECIALIDADES:
+            specialty_filter = entities.get("specialty")
+
+            # Specific specialty → list that specialty
+            if specialty_filter:
+                profs = await self.schedule_actions._find_professionals(specialty_filter, None)
+                if profs:
+                    doctors = [p.full_name for p in profs]
+                    return (
+                        f"Temos profissionais atende em *{specialty_filter}*: "
+                        f"{', '.join(doctors)}."
+                    )
+                return f"Não temos profissionais ativos em *{specialty_filter}* no momento."
+
+            # No filter → list all available specialties
             profs = await self.schedule_actions._find_professionals(None, None)
             if profs:
                 specialties = sorted(set(p.specialty for p in profs))
