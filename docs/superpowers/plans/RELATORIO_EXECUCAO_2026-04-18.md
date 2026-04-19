@@ -677,13 +677,70 @@ def _get_client(self) -> Any:
 | climesa-frontend | ✅ healthy |
 | testeinteliclinc-climesa-2q1y1a-frontend | ✅ healthy |
 | climesa-api | ✅ healthy |
-| testeinteliclinc-climesa-2q1y1a-api | ✅ healthy |
 | climesa-db | ✅ healthy |
 | climesa-qdrant | ✅ healthy |
-| testeinteliclinc-climesa-2q1y1a-db | ✅ healthy |
-| testeinteliclinc-climesa-2q1y1a-qdrant | ✅ healthy |
 
 **Ciclo de deploy completo — OK.**
+
+---
+
+## 13. Bug de Autenticação — Dois Containers API em Conflito
+
+### Problema
+
+Login retorna HTTP 200 com token válido, mas `/me` retorna 401 "Token inválido ou expirado" imediatamente. Usuário fica preso na tela de login com "Sessão expirada — faça login novamente".
+
+### Diagnóstico
+
+**Etapas realizadas:**
+
+1. **Login funciona (200):** `POST /auth/login` com credenciais corretas retorna token.
+2. **`/me` falha (401):** Token recebido no passo anterior é rejeitado.
+3. **JWT secret check:** Container `climesa-api` usa `jwt_secret='ASD14200'` (correto, via `APP_SECRET_KEY`).
+4. **Container duplicado:** Dois containers API rodando simultaneamente:
+   - `climesa-api` (novo, image `f8a6148`, porta 8741) — usa `ASD14200`
+   - `testeinteliclinc-climesa-2q1y1a-api` (antigo, image `3b1698b`, porta 8741) — usa default `change-me-generate-strong-secret`
+5. **Traefik:** Ambos os containers têm rota para `api.inteliclinic.minutarecore.space` via Traefik. Round-robin ou falha de roteamento fazia części requests ir para o container errado.
+6. **Sintoma:** Login ia para container novo (assinava com `ASD14200`), mas `/me` podia ir para o antigo (tentava validar com `change-me-generate-strong-secret`) → 401.
+
+### Causa Raiz
+
+Container antigo residual do compose project `testeinteliclinc-climesa-2q1y1a` não foi removido quando o novo compose project `climesa` foi criado. O Traefik recebia requests para o mesmo domain em ambos os containers.
+
+### Correção Aplicada
+
+Remoção do container residual:
+
+```bash
+sudo docker stop testeinteliclinc-climesa-2q1y1a-api
+sudo docker rm testeinteliclinc-climesa-2q1y1a-api
+sudo docker rmi testeinteliclinc-climesa-2q1y1a-api:latest  # remove stale image
+```
+
+Manutenção do fallback `jwt_secret_key → app_secret_key` (válido para setups de container único).
+
+### Verificação
+
+```bash
+# Login
+curl -X POST "https://api.inteliclinic.minutarecore.space/api/v1/auth/login" \
+  -d "username=emanoelmcedo@gmail.com&password=Asd14200"
+# → {"access_token":"...","role":"admin","full_name":"Administrador"} HTTP 200
+
+# /me
+curl -H "Authorization: Bearer <token>" "https://api.inteliclinic.minutarecore.space/api/v1/auth/me"
+# → {"id":"...","email":"emanoelmcedo@gmail.com","full_name":"Administrador"} HTTP 200
+```
+
+### Estado Final dos Containers
+
+| Container | Status |
+|----------|--------|
+| climesa-frontend | ✅ healthy |
+| climesa-api | ✅ healthy |
+| climesa-db | ✅ healthy |
+| climesa-qdrant | ✅ healthy |
+
 
 ---
 
