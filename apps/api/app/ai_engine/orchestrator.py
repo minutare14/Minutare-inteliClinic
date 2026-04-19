@@ -614,9 +614,12 @@ class AIOrchestrator:
             if composed.rag_used:
                 state.route = "rag_retrieval"
                 state.source_of_truth = "rag"
+            elif composed.route and composed.route != "unknown":
+                state.route = composed.route
+                state.source_of_truth = composed.source_of_truth if composed.source_of_truth != "none" else "llm"
             else:
                 state.route = "fallback"
-            state.source_of_truth = "llm" if composed.mode == "llm" else "template"
+                state.source_of_truth = "llm" if composed.mode == "llm" else "template"
 
         logger.info(
             "[NODE:decision_router] route=%s mode=%s retrieval_mode=%s rag_used=%s "
