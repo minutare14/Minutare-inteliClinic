@@ -21,14 +21,22 @@ import {
   getAdminLogs,
   getTelegramStatus,
   reconfigureTelegramWebhook,
+  getServices,
+  createService,
+  updateService,
+  deactivateService,
+  upsertServicePrice,
+  getServiceCategories,
+  linkProfessionalToService,
+  unlinkProfessionalFromService,
 } from "@/lib/api";
-import type { ClinicSettings, InsuranceItem, PromptItem, ClinicSpecialty, AuditEvent } from "@/lib/types";
+import type { ClinicSettings, InsuranceItem, PromptItem, ClinicSpecialty, AuditEvent, ServiceRead, ServiceCategoryRead } from "@/lib/types";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Card, CardBody } from "@/components/ui/card";
 import { DocumentUpload } from "@/components/admin/document-upload";
 import { DocumentList } from "@/components/admin/document-list";
 
-type Tab = "clinica" | "branding" | "ia" | "convenios" | "especialidades" | "integracoes" | "logs" | "prompts" | "documentos";
+type Tab = "clinica" | "branding" | "ia" | "convenios" | "especialidades" | "servicos" | "integracoes" | "logs" | "prompts" | "documentos";
 
 const EMBEDDING_MODEL_DEFAULTS: Record<string, string> = {
   local: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -45,6 +53,7 @@ export default function AdminPage() {
     { id: "ia", label: "IA & RAG" },
     { id: "convenios", label: "Convênios" },
     { id: "especialidades", label: "Especialidades" },
+    { id: "servicos", label: "Serviços" },
     { id: "documentos", label: "Documentos" },
     { id: "integracoes", label: "Integrações" },
     { id: "logs", label: "Logs" },
@@ -79,6 +88,7 @@ export default function AdminPage() {
       {tab === "ia" && <AITab />}
       {tab === "convenios" && <InsuranceTab />}
       {tab === "especialidades" && <SpecialtiesTab />}
+      {tab === "servicos" && <ServicosTab />}
       {tab === "documentos" && <DocumentosTab />}
       {tab === "integracoes" && <IntegracoesTab />}
       {tab === "logs" && <LogsTab />}
@@ -959,6 +969,297 @@ function SpecialtiesTab() {
           ))}
           {(items ?? []).length === 0 && (
             <p className="text-sm text-gray-400 text-center py-8">Nenhuma especialidade cadastrada.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Serviços Tab ──────────────────────────────────────────────────────────────
+
+function ServicosTab() {
+  const { data: services, loading, refetch } = useFetch(getServices, []);
+  const { data: categories } = useFetch(getServiceCategories, []);
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<ServiceRead | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Form state for create/edit
+  const [form, setForm] = useState({
+    name: "",
+    description: "",
+    category_id: "",
+    duration_min: 30,
+    requires_specific_doctor: true,
+    ai_summary: "",
+    active: true,
+  });
+
+  const filtered = (services ?? []).filter((s) =>
+    s.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm({ name: "", description: "", category_id: "", duration_min: 30, requires_specific_doctor: true, ai_summary: "", active: true });
+    setShowForm(true);
+  };
+
+  const openEdit = (svc: ServiceRead) => {
+    setEditing(svc);
+    setForm({
+      name: svc.name,
+      description: svc.description ?? "",
+      category_id: svc.category_id ?? "",
+      duration_min: svc.duration_min,
+      requires_specific_doctor: svc.requires_specific_doctor,
+      ai_summary: svc.ai_summary ?? "",
+      active: svc.active,
+    });
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const payload = {
+        name: form.name,
+        description: form.description || null,
+        category_id: form.category_id || null,
+        duration_min: form.duration_min,
+        requires_specific_doctor: form.requires_specific_doctor,
+        ai_summary: form.ai_summary || null,
+        active: form.active,
+      };
+      if (editing) {
+        await updateService(editing.id, payload);
+      } else {
+        await createService(payload);
+      }
+      setShowForm(false);
+      refetch();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeactivate = async (id: string) => {
+    await deactivateService(id);
+    refetch();
+  };
+
+  const catName = (catId: string | null) => {
+    if (!catId) return "—";
+    return categories?.find((c) => c.id === catId)?.name ?? catId;
+  };
+
+  const formatPrice = (p: number | null) =>
+    p != null ? `R$ ${p.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center gap-3">
+        <input
+          type="text"
+          placeholder="Buscar serviço..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+        />
+        <button
+          onClick={openCreate}
+          className="px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg whitespace-nowrap"
+        >
+          + Novo Serviço
+        </button>
+      </div>
+
+      {/* Service form dialog */}
+      {showForm && (
+        <Card>
+          <CardBody>
+            <h2 className="text-sm font-semibold text-gray-800 mb-4">
+              {editing ? `Editar: ${editing.name}` : "Novo Serviço"}
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <Field label="Nome do Serviço">
+                  <Input value={form.name} onChange={(v) => setForm((p) => ({ ...p, name: v }))} placeholder="Ex: CONSULTA CARDIOLOGIA" />
+                </Field>
+              </div>
+              <div className="md:col-span-2">
+                <Field label="Descrição">
+                  <Input value={form.description} onChange={(v) => setForm((p) => ({ ...p, description: v }))} placeholder="Breve descrição do serviço" />
+                </Field>
+              </div>
+              <Field label="Categoria">
+                <select
+                  value={form.category_id}
+                  onChange={(e) => setForm((p) => ({ ...p, category_id: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">Sem categoria</option>
+                  {(categories ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Duração (minutos)">
+                <Input type="number" value={String(form.duration_min)} onChange={(v) => setForm((p) => ({ ...p, duration_min: parseInt(v) || 30 }))} />
+              </Field>
+              <div className="md:col-span-2">
+                <Field label="Resumo para IA (ai_summary)">
+                  <Textarea
+                    value={form.ai_summary}
+                    onChange={(v) => setForm((p) => ({ ...p, ai_summary: v }))}
+                    placeholder="Resumo curto usado pela IA para identificar o serviço..."
+                    rows={2}
+                  />
+                </Field>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="req_doc"
+                  checked={form.requires_specific_doctor}
+                  onChange={(e) => setForm((p) => ({ ...p, requires_specific_doctor: e.target.checked }))}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <label htmlFor="req_doc" className="text-sm text-gray-700">
+                  Exige médico específico
+                </label>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  id="svc_active"
+                  checked={form.active}
+                  onChange={(e) => setForm((p) => ({ ...p, active: e.target.checked }))}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <label htmlFor="svc_active" className="text-sm text-gray-700">
+                  Ativo
+                </label>
+              </div>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={handleSave}
+                disabled={saving || !form.name.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+              >
+                {saving ? "Salvando..." : editing ? "Salvar Alterações" : "Criar Serviço"}
+              </button>
+              <button
+                onClick={() => setShowForm(false)}
+                className="px-3 py-2 text-sm text-gray-600 hover:text-gray-900"
+              >
+                Cancelar
+              </button>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Service list */}
+      {loading ? (
+        <p className="text-sm text-gray-400">Carregando...</p>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((svc) => (
+            <div key={svc.id} className="bg-white border border-gray-200 rounded-lg">
+              <div
+                className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50"
+                onClick={() => setExpandedId(expandedId === svc.id ? null : svc.id)}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-800 truncate">{svc.name}</span>
+                    <span className="text-xs text-gray-400">{catName(svc.category_id)}</span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5">
+                    <span className="text-xs text-gray-500">
+                      {svc.base_price != null ? formatPrice(svc.base_price) : "sem preço"}
+                    </span>
+                    {svc.doctors.length > 0 && (
+                      <span className="text-xs text-gray-400">
+                        {svc.doctors.map((d) => d.full_name).join(", ")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 ml-4">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${svc.active ? "bg-green-50 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                    {svc.active ? "Ativo" : "Inativo"}
+                  </span>
+                  <span className="text-xs text-gray-300">{expandedId === svc.id ? "▲" : "▼"}</span>
+                </div>
+              </div>
+
+              {/* Expanded details */}
+              {expandedId === svc.id && (
+                <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-3">
+                  {/* Description + AI summary */}
+                  {svc.description && (
+                    <p className="text-xs text-gray-600">{svc.description}</p>
+                  )}
+                  {svc.ai_summary && (
+                    <p className="text-xs text-gray-500 italic">ℹ️ {svc.ai_summary}</p>
+                  )}
+                  {/* Rules */}
+                  {svc.rules && svc.rules.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-1">Regras operacionais:</p>
+                      {svc.rules.map((r) => (
+                        <div key={r.id} className="text-xs text-gray-600 bg-gray-50 rounded px-2 py-1 mb-1">
+                          <span className="font-medium text-gray-700">[{r.rule_type}]</span> {r.rule_text}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Doctors */}
+                  {svc.doctors.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 mb-1">Médicos vinculados:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {svc.doctors.map((d) => (
+                          <span key={d.id} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">
+                            {d.full_name} — {d.specialty}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openEdit(svc); }}
+                      className="px-3 py-1.5 text-xs font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50"
+                    >
+                      Editar
+                    </button>
+                    {svc.active && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeactivate(svc.id); }}
+                        className="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+                      >
+                        Desativar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-8">
+              {(services ?? []).length === 0 ? "Nenhum serviço cadastrado." : "Nenhum serviço encontrado."}
+            </p>
           )}
         </div>
       )}

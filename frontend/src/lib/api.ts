@@ -30,6 +30,11 @@ import type {
   CrmStats,
   CrmFollowUp,
   CrmAlert,
+  ServiceRead,
+  ServiceCategoryRead,
+  ServiceCreate,
+  ServiceUpdate,
+  ProfessionalServiceLinkRead,
 } from "./types";
 
 async function fetchApi<T>(
@@ -314,6 +319,46 @@ export const updateSpecialty = (id: string, data: Record<string, unknown>) =>
 
 export const deleteSpecialty = (id: string) =>
   fetchApi<void>(`${API_PREFIX}/admin/specialties/${id}`, { method: 'DELETE' });
+
+// Admin — Services
+export const getServiceCategories = () =>
+  fetchApi<ServiceCategoryRead[]>(`${API_PREFIX}/admin/services/categories`);
+
+export const getServices = () =>
+  fetchApi<ServiceRead[]>(`${API_PREFIX}/admin/services`);
+
+export const getService = (id: string) =>
+  fetchApi<ServiceRead>(`${API_PREFIX}/admin/services/${id}`);
+
+export const createService = (data: ServiceCreate) =>
+  fetchApi<ServiceRead>(`${API_PREFIX}/admin/services`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const updateService = (id: string, data: ServiceUpdate) =>
+  fetchApi<ServiceRead>(`${API_PREFIX}/admin/services/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+
+export const deactivateService = (id: string) =>
+  fetchApi<ServiceRead>(`${API_PREFIX}/admin/services/${id}`, { method: 'DELETE' });
+
+export const upsertServicePrice = (serviceId: string, data: { price: number; insurance_plan_id?: string | null; copay?: number | null }) =>
+  fetchApi<{ id: string; price: number; copay: number | null; version: number }>(
+    `${API_PREFIX}/admin/services/${serviceId}/prices`,
+    { method: 'POST', body: JSON.stringify(data) }
+  );
+
+export const linkProfessionalToService = (serviceId: string, data: { professional_id: string; notes?: string | null; priority_order?: number }) =>
+  fetchApi<ProfessionalServiceLinkRead>(`${API_PREFIX}/admin/services/${serviceId}/doctors`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+
+export const unlinkProfessionalFromService = (serviceId: string, professionalId: string) =>
+  fetchApi<void>(`${API_PREFIX}/admin/services/${serviceId}/doctors/${professionalId}`, { method: 'DELETE' });
 
 // Admin — Documents
 export interface DocumentUploadResponse {

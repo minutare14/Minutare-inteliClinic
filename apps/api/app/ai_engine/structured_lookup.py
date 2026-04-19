@@ -6,15 +6,26 @@ Priority 1 in the response chain, BEFORE RAG and LLM.
 Handles:
   - Doctor→specialty: "Em qual especialidade a Dra. Ana Paula atende?"
   - Specialty→doctors: "Quais médicos atendem ortopedia?"
+  - Service→price: "Quanto custa a consulta neurológica?"
+  - Service→doctor: "Quem faz peeling químico?"
   - Insurance catalog: "Quais convênios vocês aceitam?"
   - Clinic address: "Qual o endereço de vocês?"
   - Clinic phone: "Qual o telefone de vocês?"
+  - Opening hours: "Qual o horário de atendimento?"
+  - Prices: "Quanto custa uma consulta?"
 
 Decision rules:
   1. doctor_name entity + any specialty/info intent → lookup doctor by name
   2. specialty entity + "quais médicos" question → lookup by specialty
-  3. insurance keywords → return insurance catalog
-  4. address/location keywords → return ClinicSettings address
+  3. service keywords → lookup service price/doctor/rule from structured tables
+  4. insurance keywords → return insurance catalog
+  5. address/location keywords → return ClinicSettings address
+  6. phone keywords → return ClinicSettings phone
+  7. hours keywords → return opening hours
+  8. price keywords → return service price from structured tables
+
+CRITICAL: Prices, doctors, rules, and availability ALWAYS come from structured
+tables first. Pinecone is only a semantic fallback for open-ended questions.
 """
 from __future__ import annotations
 
@@ -84,6 +95,12 @@ _PRICE_KW = {
     "orcamento", "consulta", "sessao",
 }
 
+_SERVICE_KW = {
+    "consulta", "retorno", "procedimento", "exame",
+    "atendimento", "servico",
+    "triagem", "orientacao",
+}
+
 
 def _normalize(text: str) -> str:
     """Remove accents for keyword matching."""
@@ -137,11 +154,17 @@ def _is_structured_query(user_text: str, faro: FaroBrief) -> bool:
     if specialty:
         return True
 
+    if _matches_any(text_norm, _SERVICE_KW):
+        return True
+    if _matches_any(text_norm, _PRICE_KW):
+        return True
     if _matches_any(text_norm, _INSURANCE_KW):
         return True
     if _matches_any(text_norm, _ADDRESS_KW):
         return True
     if _matches_any(text_norm, _PHONE_KW):
+        return True
+    if _matches_any(text_norm, _HOURS_KW):
         return True
 
     return False
@@ -153,12 +176,24 @@ class StructuredLookup:
 
     Instantiated in orchestrator.__init__() and called after guardrails,
     before _execute_action() and ResponseComposer.
+
+    Priority order:
+      1. Doctor → specialty (most specific)
+      2. Specialty → doctors list
+      3. Service → price/doctor/rule (from ServiceRepository)
+      4. Insurance catalog
+      5. Clinic address
+      6. Clinic phone/contact
+      7. Opening hours
+      8. Prices (from ServiceRepository — NOT RAG)
     """
 
     def __init__(self, session, rag_svc: "RagService | None" = None) -> None:
         from app.repositories.professional_repository import ProfessionalRepository
+        from app.repositories.service_repository import ServiceRepository
         self.prof_repo = ProfessionalRepository(session)
-        self.rag_svc = rag_svc  # injected to avoid creating new sessions in _lookup_prices
+        self.svc_repo = ServiceRepository(session)
+        self.rag_svc = rag_svc
 
     async def lookup(
         self,
@@ -208,6 +243,15 @@ class StructuredLookup:
             or faro.intent == Intent.LISTAR_ESPECIALIDADES
         ):
             result = await self._lookup_specialty_doctors(specialty)
+            if result.answered:
+                return result
+
+        # ── Priority 2b: Service lookup (price, doctor, rule) ───────────────
+        # "quanto custa consulta neurológica?"
+        # "quem faz peeling?"
+        # "qual o valor da consulta?"
+        if _matches_any(text_norm, _PRICE_KW) or _matches_any(text_norm, _SERVICE_KW):
+            result = await self._lookup_service(text_norm, specialty, insurance_items or [])
             if result.answered:
                 return result
 
@@ -305,7 +349,7 @@ class StructuredLookup:
             return LookupResult(answered=False, text="", source="professionals")
 
         logger.info(
-            "[STRUCTURED] specialty→doctors: '%s' active_only=True professionals_returned=%d",
+            "[STRUCTURED] specialty→doctors: specialty='%s' active_only=True professionals_returned=%d",
             specialty, len(profs),
         )
 
@@ -440,12 +484,94 @@ class StructuredLookup:
         logger.info("[STRUCTURED] hours lookup: using default fallback")
         return LookupResult(answered=True, text=default_text, source="structured_lookup")
 
+    # ── Service lookup (prices, doctors, rules from structured tables) ───────
+
+    async def _lookup_service(
+        self, text_norm: str, specialty: str | None, insurance_items: list
+    ) -> LookupResult:
+        """
+        Answer questions about services, prices, and who performs them.
+
+        Uses ServiceRepository as source of truth — NOT RAG.
+        RAG is only a fallback for supplementary context.
+        """
+        from app.core.config import settings
+
+        # Try to match service by name keywords or specialty
+        matched_services = await self.svc_repo.find_service_by_keywords(
+            settings.clinic_id, text_norm
+        )
+
+        # If a specialty was extracted, filter by it
+        if specialty and matched_services:
+            filtered = [s for s in matched_services if specialty.lower() in s["name"].lower()]
+            if filtered:
+                matched_services = filtered
+
+        if not matched_services:
+            return LookupResult(answered=False, text="", source="none")
+
+        # Build response from matched services
+        lines = []
+        for svc in matched_services[:3]:
+            lines.append(f"*{svc['name']}*")
+            if svc.get("description"):
+                lines.append(f"  {svc['description']}")
+            if svc.get("base_price") is not None:
+                lines.append(f"  💰 Valor: R$ {svc['base_price']:,.2f}")
+            if svc.get("ai_summary"):
+                lines.append(f"  ℹ️ {svc['ai_summary']}")
+            if svc.get("doctors"):
+                names = [d["full_name"] for d in svc["doctors"]]
+                lines.append(f"  👨‍⚕️ Atendimento: {', '.join(names)}")
+            if svc.get("rules"):
+                for rtype, rtext in svc["rules"].items():
+                    if rtext:
+                        lines.append(f"  📋 {rtype}: {rtext}")
+            lines.append("")
+
+        text = "\n".join(lines).strip()
+        if not text:
+            return LookupResult(answered=False, text="", source="none")
+
+        logger.info(
+            "[STRUCTURED:SERVICE] matched=%d text_chars=%d source=structured_service",
+            len(matched_services), len(text),
+        )
+        return LookupResult(answered=True, text=text, source="structured_service")
+
     async def _lookup_prices(self) -> LookupResult:
-        """Return price/cost information. Uses RAG if available, otherwise fallback."""
-        # Try RAG with pricing category — use injected rag_svc to avoid session leaks
-        if self.rag_svc is None:
-            logger.info("[STRUCTURED] prices lookup: no rag_svc injected, using fallback")
-        else:
+        """Return price/cost information from ServiceRepository (structured tables).
+
+        CRITICAL: Always uses structured tables as primary source.
+        RAG is only a semantic fallback for supplementary context.
+        NEVER uses Pinecone/RAG as primary source for prices.
+        """
+        # Try structured tables first (ServiceRepository)
+        from app.core.config import settings
+
+        try:
+            services = await self.svc_repo.list_services_with_prices(settings.clinic_id)
+            if services:
+                lines = ["Serviços e valores disponíveis:\n"]
+                for svc in services:
+                    price_str = f"R$ {svc['base_price']:,.2f}" if svc.get("base_price") is not None else "consulte"
+                    doctor_str = ""
+                    if svc.get("doctors"):
+                        names = [d["full_name"] for d in svc["doctors"]]
+                        doctor_str = f" ({', '.join(names)})"
+                    lines.append(f"• {svc['name']}: {price_str}{doctor_str}")
+                text = "\n".join(lines)
+                logger.info(
+                    "[STRUCTURED:PRICE] services=%d source=structured_service",
+                    len(services),
+                )
+                return LookupResult(answered=True, text=text, source="structured_service")
+        except Exception:
+            logger.exception("[STRUCTURED:PRICE] structured lookup failed — falling to RAG")
+
+        # RAG fallback ONLY for supplementary context
+        if self.rag_svc is not None:
             try:
                 rows = await self.rag_svc.text_search(
                     "preço tabela custo procedimento consulta",
@@ -453,21 +579,22 @@ class StructuredLookup:
                     category="pricing",
                 )
                 if rows:
-                    lines = ["Informações de preços encontradas:\n"]
+                    lines = ["Informações de preços encontradas (contexto complementar):\n"]
                     for r in rows:
                         snippet = r.content[:300] if hasattr(r, "content") else ""
                         lines.append(f"• {r.title}: {snippet}")
-                    logger.info("[STRUCTURED] prices lookup via RAG: %d results", len(rows))
+                    logger.info("[STRUCTURED:PRICE] via RAG: %d results (supplementary only)", len(rows))
                     return LookupResult(answered=True, text="\n".join(lines), source="rag_pricing")
             except Exception:
                 pass
 
-        # Fallback
+        # Absolute fallback — structured default
         default_text = (
-            "Para informações sobre preços e tabelas de procedimentos, "
-            "por favor entre em contato diretamente com a clínica pelo telefone de atendimento. "
-            "Cada procedimento pode ter um valor diferente dependendo do plano de saúde ou convênio."
+            "Os valores podem variar conforme o profissional e o convênio. "
+            "Para informações precisas sobre o serviço que você procura, "
+            "por favor pergunte especificamente pelo nome do serviço ou especialidade."
         )
-        logger.info("[STRUCTURED] prices lookup: using fallback")
+        logger.info("[STRUCTURED:PRICE] using absolute fallback")
         return LookupResult(answered=True, text=default_text, source="structured_lookup")
+
 

@@ -170,3 +170,144 @@ class PromptRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── ServiceCategory ─────────────────────────────────────────────────────────
+
+class ServiceCategoryCreate(BaseModel):
+    name: str
+    description: str | None = None
+
+
+class ServiceCategoryUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    active: bool | None = None
+
+
+class ServiceCategoryRead(BaseModel):
+    id: uuid.UUID
+    clinic_id: str
+    name: str
+    description: str | None
+    active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Service ────────────────────────────────────────────────────────────────────
+
+class ServiceCreate(BaseModel):
+    name: str
+    description: str | None = None
+    category_id: uuid.UUID | None = None
+    duration_min: int = 30
+    requires_specific_doctor: bool = True
+    ai_summary: str | None = None
+    active: bool = True
+
+
+class ServiceUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    category_id: uuid.UUID | None = None
+    duration_min: int | None = None
+    requires_specific_doctor: bool | None = None
+    ai_summary: str | None = None
+    active: bool | None = None
+
+
+class ServiceDoctorSummary(BaseModel):
+    id: uuid.UUID
+    full_name: str
+    specialty: str
+
+
+class ServicePriceSummary(BaseModel):
+    id: uuid.UUID
+    insurance_plan_id: uuid.UUID | None
+    price: float
+    copay: float | None
+
+
+class ServiceRuleSummary(BaseModel):
+    id: uuid.UUID
+    rule_type: str
+    rule_text: str
+    version: int
+
+
+class ServiceRead(BaseModel):
+    id: uuid.UUID
+    clinic_id: str
+    name: str
+    description: str | None
+    category_id: uuid.UUID | None
+    category_name: str | None
+    duration_min: int
+    active: bool
+    requires_specific_doctor: bool
+    ai_summary: str | None
+    version: int
+    base_price: float | None
+    doctors: list[ServiceDoctorSummary]
+    prices: list[ServicePriceSummary] | None = None
+    rules: list[ServiceRuleSummary] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── ServicePrice ─────────────────────────────────────────────────────────────
+
+class ServicePriceUpsert(BaseModel):
+    insurance_plan_id: uuid.UUID | None = None  # None = particular
+    price: float
+    copay: float | None = None
+
+
+# ── ServiceOperationalRule ──────────────────────────────────────────────────
+
+class ServiceRuleCreate(BaseModel):
+    rule_type: str  # scheduling | insurance | teleconsult | return_window | general
+    rule_text: str
+
+
+class ServiceRuleUpdate(BaseModel):
+    rule_text: str | None = None
+    active: bool | None = None
+
+
+class ServiceRuleRead(BaseModel):
+    id: uuid.UUID
+    service_id: uuid.UUID | None
+    rule_type: str
+    rule_text: str
+    active: bool
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── ProfessionalServiceLink ────────────────────────────────────────────────
+
+class ProfessionalServiceLinkCreate(BaseModel):
+    professional_id: uuid.UUID
+    notes: str | None = None
+    priority_order: int = 0
+
+
+class ProfessionalServiceLinkRead(BaseModel):
+    id: uuid.UUID
+    professional_id: uuid.UUID | None
+    service_id: uuid.UUID | None
+    notes: str | None
+    active: bool
+    priority_order: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

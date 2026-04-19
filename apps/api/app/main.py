@@ -21,6 +21,8 @@ import app.models.rag  # noqa: F401
 import app.models.admin  # noqa: F401
 import app.models.auth  # noqa: F401
 import app.models.jobs  # noqa: F401
+import app.models.service  # noqa: F401
+import app.models.overrides  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +136,7 @@ from app.api.routes.audit import router as audit_router  # noqa: E402
 from app.api.routes.dashboard import router as dashboard_router  # noqa: E402
 from app.api.routes.professionals import router as professionals_router  # noqa: E402
 from app.api.routes.admin import router as admin_router  # noqa: E402
+from app.api.routes.admin_services import router as admin_services_router  # noqa: E402
 from app.api.routes.crm import router as crm_router  # noqa: E402
 from app.api.routes.google import router as google_router  # noqa: E402
 from app.api.routes.document_upload import router as document_upload_router  # noqa: E402
@@ -153,6 +156,7 @@ app.include_router(audit_router, prefix=API_PREFIX)
 app.include_router(dashboard_router, prefix=API_PREFIX)
 app.include_router(professionals_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
+app.include_router(admin_services_router, prefix=API_PREFIX)
 app.include_router(crm_router, prefix=API_PREFIX)
 app.include_router(google_router, prefix=API_PREFIX)
 app.include_router(document_upload_router, prefix=API_PREFIX)

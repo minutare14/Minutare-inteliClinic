@@ -128,6 +128,9 @@ class ConversationState:
     specialties_source: str = "hardcoded"  # "db" | "hardcoded"
     insurance_catalog_size: int = 0
 
+    # FARO + professional data injected into composer prompt
+    faro_brief: dict = field(default_factory=dict)  # includes "available_professionals"
+
     # FARO output
     intent: str = Intent.DESCONHECIDA.value
     confidence: float = 0.0
@@ -451,6 +454,22 @@ class AIOrchestrator:
         except Exception:
             logger.exception("[NODE:structured_data_lookup] Falha — continuando para próximo nó")
 
+        if lookup_result is None:
+            logger.info(
+                "[NODE:structured_data_lookup] lookup_result=None (exceção ou não executado) "
+                "— caindo para composer. intent=%s specialty=%s",
+                faro.intent.value,
+                faro.entities.get("specialty"),
+            )
+        elif not lookup_result.answered:
+            logger.info(
+                "[NODE:structured_data_lookup] answered=False — caindo para composer. "
+                "intent=%s specialty=%s source=%s",
+                faro.intent.value,
+                faro.entities.get("specialty"),
+                lookup_result.source,
+            )
+
         if lookup_result and lookup_result.answered:
             state.route = "structured_data_lookup"
             state.source_of_truth = lookup_result.source
@@ -539,6 +558,7 @@ class AIOrchestrator:
             composed = await self.composer.compose(
                 context=context,
                 faro=faro,
+                faro_brief=state.faro_brief,
                 user_text=user_text,
                 clinic_cfg=clinic_cfg,
                 clinic_name=clinic_name,

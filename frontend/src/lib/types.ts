@@ -272,6 +272,87 @@ export interface ClinicSpecialty {
   created_at: string;
 }
 
+// ── Services ─────────────────────────────────────────────────────────────────
+
+export interface ServiceDoctorSummary {
+  id: string;
+  full_name: string;
+  specialty: string;
+}
+
+export interface ServicePriceSummary {
+  id: string;
+  insurance_plan_id: string | null;
+  price: number;
+  copay: number | null;
+}
+
+export interface ServiceRuleSummary {
+  id: string;
+  rule_type: string;
+  rule_text: string;
+  version: number;
+}
+
+export interface ServiceCategoryRead {
+  id: string;
+  clinic_id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface ServiceRead {
+  id: string;
+  clinic_id: string;
+  name: string;
+  description: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  duration_min: number;
+  active: boolean;
+  requires_specific_doctor: boolean;
+  ai_summary: string | null;
+  version: number;
+  base_price: number | null;
+  doctors: ServiceDoctorSummary[];
+  prices: ServicePriceSummary[] | null;
+  rules: ServiceRuleSummary[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceCreate {
+  name: string;
+  description?: string | null;
+  category_id?: string | null;
+  duration_min?: number;
+  requires_specific_doctor?: boolean;
+  ai_summary?: string | null;
+  active?: boolean;
+}
+
+export interface ServiceUpdate {
+  name?: string | null;
+  description?: string | null;
+  category_id?: string | null;
+  duration_min?: number | null;
+  requires_specific_doctor?: boolean | null;
+  ai_summary?: string | null;
+  active?: boolean | null;
+}
+
+export interface ProfessionalServiceLinkRead {
+  id: string;
+  professional_id: string | null;
+  service_id: string | null;
+  notes: string | null;
+  active: boolean;
+  priority_order: number;
+  created_at: string;
+}
+
 // ── CRM ──────────────────────────────────────────────────────────────────────
 
 export interface CrmLead {

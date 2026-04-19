@@ -19,7 +19,11 @@ class ProfessionalRepository:
     async def list_active(self, specialty: str | None = None) -> list[Professional]:
         stmt = select(Professional).where(Professional.active.is_(True))
         if specialty:
-            stmt = stmt.where(Professional.specialty.ilike(f"%{specialty}%"))
+            # Search in main specialty AND secondary specialties
+            stmt = stmt.where(
+                (Professional.specialty.ilike(f"%{specialty}%"))
+                | (Professional.specialties_secondary.ilike(f"%{specialty}%"))
+            )
         stmt = stmt.order_by(Professional.full_name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -65,7 +69,22 @@ class ProfessionalRepository:
         """List all professionals including inactive (for admin view)."""
         stmt = select(Professional)
         if specialty:
-            stmt = stmt.where(Professional.specialty.ilike(f"%{specialty}%"))
+            stmt = stmt.where(
+                (Professional.specialty.ilike(f"%{specialty}%"))
+                | (Professional.specialties_secondary.ilike(f"%{specialty}%"))
+            )
+        stmt = stmt.order_by(Professional.full_name)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_by_insurance(self, insurance_name: str) -> list[Professional]:
+        """List active professionals who accept a given insurance plan."""
+        stmt = (
+            select(Professional)
+            .where(Professional.active.is_(True))
+            .where(Professional.accepts_insurance.is_(True))
+            .where(Professional.insurance_plans.ilike(f"%{insurance_name}%"))
+        )
         stmt = stmt.order_by(Professional.full_name)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
