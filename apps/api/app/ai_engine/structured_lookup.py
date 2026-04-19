@@ -85,7 +85,8 @@ _HOURS_KW = {
     "abre", "abrimos", "abre que horas",
     "funciona", "funcionamento", "atendimento",
     "da clinica", "do consultorio",
-    "sabado", "sbado", "domingo",
+    "sabado", "sbado", "sábado", "sábados",
+    "domingo", "feriado",
 }
 
 _PRICE_KW = {
@@ -99,6 +100,12 @@ _SERVICE_KW = {
     "consulta", "retorno", "procedimento", "exame",
     "atendimento", "servico",
     "triagem", "orientacao",
+}
+
+_CLINIC_NAME_KW = {
+    "nome da clinica", "nome da clínica", "nome clinica",
+    "clinica", "clínica", "nome do consultorio",
+    "nome consultorio", "razao social",
 }
 
 
@@ -233,6 +240,14 @@ class StructuredLookup:
         entities = faro.entities
         doctor_name = entities.get("doctor_name")
         specialty = entities.get("specialty")
+
+        # ── Priority 0: Clinic info topic (from NER) ────────────────────────
+        # "qual o nome da clínica?", "a clínica tem..." etc.
+        clinic_topic = entities.get("clinic_info_topic")
+        if clinic_topic:
+            result = self._lookup_clinic_topic(clinic_topic, clinic_cfg)
+            if result.answered:
+                return result
 
         # ── Priority 1: Specific doctor's specialty ───────────────────────────
         # "Em qual especialidade a Dra. Ana Paula atende?"
@@ -446,6 +461,51 @@ class StructuredLookup:
         )
         logger.info("[STRUCTURED] insurance lookup: %d convênios (source=insurance_catalog)", len(names))
         return LookupResult(answered=True, text=text, source="insurance_catalog")
+
+    def _lookup_clinic_topic(self, topic: str, clinic_cfg) -> LookupResult:
+        """Return clinic information based on detected topic (nome, endereço, telefone, etc.)."""
+        topic_normalized = _normalize(topic)
+
+        # "nome da clínica" / "a clínica" → return clinic name
+        if any(kw in topic_normalized for kw in ["nome", "clínica", "clinica"]):
+            clinic_name = None
+            if clinic_cfg and getattr(clinic_cfg, "name", None):
+                clinic_name = clinic_cfg.name
+            elif clinic_cfg and getattr(clinic_cfg, "short_name", None):
+                clinic_name = clinic_cfg.short_name
+            else:
+                clinic_name = "Clínica"
+
+            logger.info("[STRUCTURED] clinic name lookup (source=clinic_settings)")
+            return LookupResult(
+                answered=True,
+                text=f"O nome da clínica é *{clinic_name}*.",
+                source="clinic_settings",
+            )
+
+        # "endereço" → delegate to _lookup_address
+        if any(kw in topic_normalized for kw in ["endereço", "endereco", "local", "onde"]):
+            return self._lookup_address(clinic_cfg)
+
+        # "telefone" / "contato" → delegate to _lookup_phone
+        if any(kw in topic_normalized for kw in ["telefone", "tel", "contato", "whatsapp"]):
+            return self._lookup_phone(clinic_cfg)
+
+        # "funcionamento" / "horário" / "sábado" / "domingo" → delegate to _lookup_hours
+        if any(kw in topic_normalized for kw in ["funcionamento", "horário", "horario", "sábado", "sabado", "domingo", "feriado", "atendem", "atendimento"]):
+            return self._lookup_hours(clinic_cfg)
+
+        # Fallback: try to get clinic name
+        if clinic_cfg and getattr(clinic_cfg, "name", None):
+            logger.info("[STRUCTURED] clinic topic '%s' → fallback to name (source=clinic_settings)", topic)
+            return LookupResult(
+                answered=True,
+                text=f"A clínica é *{clinic_cfg.name}*.",
+                source="clinic_settings",
+            )
+
+        logger.info("[STRUCTURED] clinic topic '%s' not handled", topic)
+        return LookupResult(answered=False, text="", source="none")
 
     def _lookup_address(self, clinic_cfg) -> LookupResult:
         """Return clinic address from ClinicSettings."""

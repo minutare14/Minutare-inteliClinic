@@ -65,3 +65,35 @@ def test_routing_no_entity_fallback():
     result = decide("o tempo está bonito hoje", DetectedEntities())
     assert result.intent == Intent.UNKNOWN
     assert result.route == "clarification_flow"
+
+
+# ─── Integration tests for refactored intent_router.py ─────────────────────────────────
+
+from app.ai_engine.intent_router import analyze
+
+def test_analyze_quais_medicos():
+    """'quais médicos vocês têm?' → LIST_PROFISSIONAIS, route=structured_data_lookup"""
+    faro = analyze("quais médicos vocês têm?")
+    assert faro.intent.value in ("listar_profissionais", "listar_especialidades", "desconhecida")
+    # Must NOT be desconhecida (that's the bug we're fixing)
+    assert faro.intent.value != "desconhecida", f"Got DESCONHECIDA for 'quais médicos vocês têm?'"
+    assert faro.routing_decision is not None
+    assert faro.routing_decision.route in ("structured_data_lookup", "schedule_flow")
+
+def test_analyze_quem_atende_neuro():
+    """'quem atende neurologia?' → LIST_PROFESSIONALS_BY_SPECIALTY"""
+    faro = analyze("quem atende neurologia?")
+    assert faro.routing_decision is not None
+    # Check the legacy intent (faro.intent) which is what the orchestrator uses
+    assert faro.intent.value == "listar_profissionais", f"Expected listar_profissionais, got {faro.intent.value}"
+    assert faro.routing_decision.route == "structured_data_lookup"
+
+def test_analyze_greeting():
+    faro = analyze("oi, bom dia!")
+    assert faro.intent.value == "saudacao"
+    assert faro.routing_decision.greeting
+
+def test_analyze_agendar():
+    faro = analyze("quero agendar com neurologista amanhã")
+    assert faro.intent.value == "agendar"
+    assert faro.routing_decision.route == "schedule_flow"

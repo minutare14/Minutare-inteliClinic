@@ -23,6 +23,7 @@ class Intent(Enum):
     GET_CLINIC_INFO = "GET_CLINIC_INFO"
     GREETING = "GREETING"
     CONFIRMATION = "CONFIRMATION"
+    FALAR_COM_HUMANO = "FALAR_COM_HUMANO"
     UNKNOWN = "UNKNOWN"
 
 
@@ -63,8 +64,9 @@ _routing_intent_to_legacy_str = {
     Intent.CONFIRMATION: "confirmacao",
     Intent.GET_PROFESSIONAL_SPECIALTY: "listar_profissionais",
     Intent.LIST_PROFISSIONAIS_BY_SPECIALTY: "listar_profissionais",
-    Intent.CHECK_AVAILABILITY: "desconhecida",
+    Intent.CHECK_AVAILABILITY: "agendar",
     Intent.GET_CLINIC_INFO: "duvida_operacional",
+    Intent.FALAR_COM_HUMANO: "falar_com_humano",
     Intent.UNKNOWN: "desconhecida",
 }
 
@@ -122,21 +124,41 @@ class RoutingDecision:
 # -------------------------------------------------------------------
 
 _SCHEDULING_VERBS = frozenset({
-    "agendar", "marcar", "reservar", "consulta", "atendimento",
-    "bloquear", "horário", "horario", "disponibilidade",
-    "verificar", "checar", "confirmar",
+    "agendar", "marcar", "reservar", "bloquear",
+    "verificar", "checar", "confirmar", "reagendar",
+    "remarcar", "cancelar", "desmarcar", "preciso",
+    "horário", "horários", "disponível", "disponíveis",
+    "disponivel", "disponiveis", "vaga", "vagas",
+    "agenda", "horários disponíveis", "tem horário",
+    "tem agenda", "tem vaga",
 })
 
 _LISTING_PATTERNS = frozenset({
-    "quais", "quem", "listar", "mostrar", "exibir",
-    "tenho", "preciso", "gostaria", "quero",
+    "quais", "quem", "que", "listar", "mostrar", "exibir",
+    "tenho", "gostaria", "quero", "existe",
+    "existem", "tem", "há", "têm", "doutor", "dra",
+    "relação", "relacão", "liste", "me mostra",
+    "equipe", "staff", "corpo clínico", "corpo medico",
+    "vocês", "vocs", "vcs", "médico", "médicos",
+    "profissional", "profissionais", "neuro", "cardio",
+    "ortop", "pedia", "gineco", "dermato", "oftalmo",
+    "área", "áreas", "cadastrados", "cadastrado",
+    "cadastrada",
 })
 
 _CLINIC_INFO_PATTERNS = frozenset({
     "endereço", "endereco", "localização", "localizacao",
     "telefone", "contato", "funcionamento", "horário", "horario",
     "convênio", "convenio", "plano", "unidade", "unidades",
-    "valor", "preço", "preco", "consulta",
+    "valor", "preço", "preco",
+    "onde", "fica", "fica?", "local",
+    "sábado", "sábados", "sabado", "domingo", "feriado",
+})
+
+_HUMAN_HANDOVER_PATTERNS = frozenset({
+    "falar com humano", "falar com uma pessoa", "falar com atendente",
+    "atendimento humano", "humano", "pessoa real", "real",
+    "encaminhar equipe", "encaminhar atendente",
 })
 
 _CONFIRMATION_PATTERNS = frozenset({
@@ -174,6 +196,20 @@ def _contains_listing_pattern(text: str) -> bool:
     return any(p in normalized for p in _LISTING_PATTERNS)
 
 
+_AVAILABILITY_KEYWORDS = frozenset({
+    "horário", "horários", "disponível", "disponíveis",
+    "disponivel", "disponiveis", "vaga", "vagas",
+    "agenda", "horários disponíveis", "tem horário",
+    "tem agenda", "tem vaga",
+})
+
+
+def _contains_availability_keyword(text: str) -> bool:
+    """Return True if text contains availability/scheduling keywords."""
+    normalized = text.lower()
+    return any(kw in normalized for kw in _AVAILABILITY_KEYWORDS)
+
+
 # -------------------------------------------------------------------
 # Main entry point
 # -------------------------------------------------------------------
@@ -198,13 +234,27 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
     word_count = len(text.split())
 
     # -----------------------------------------------------------------
+    # Rule 0 — Human handoff (before everything else)
+    # -----------------------------------------------------------------
+    if any(p in normalized for p in _HUMAN_HANDOVER_PATTERNS):
+        return RoutingDecision(
+            intent=Intent.FALAR_COM_HUMANO,
+            confidence=0.95,
+            route="handoff_flow",
+            source_of_truth="pattern:human_handover",
+            tool_used="handoff",
+            suggested_action={"action": "handoff", "args": {}},
+            reason="Human handoff pattern detected",
+        )
+
+    # -----------------------------------------------------------------
     # Rule 1 — Confirmation
     # -----------------------------------------------------------------
     if _detect_confirmation(normalized):
         return RoutingDecision(
             intent=Intent.CONFIRMATION,
             confidence=0.95,
-            route="clarification_flow",
+            route="structured_data_lookup",
             source_of_truth="confirmation_pattern",
             suggested_action={"action": "confirm", "args": {}},
             reason="Confirmation pattern detected",
@@ -217,7 +267,7 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
         return RoutingDecision(
             intent=Intent.GREETING,
             confidence=0.95,
-            route="clarification_flow",
+            route="structured_data_lookup",
             source_of_truth="entity:greeting",
             suggested_action={"action": "greet", "args": {}},
             reason="Greeting entity detected, short text",
@@ -234,24 +284,38 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
                 confidence=0.9,
                 route="schedule_flow",
                 source_of_truth="entity:professional_name + scheduling_verb",
-                tool_used="schedule_service",
+                tool_used="schedule_actions",
                 suggested_action={
                     "action": "schedule_with_professional",
                     "args": {"professional_name": entities.professional_name},
                 },
                 reason="professional_name detected with scheduling verb",
             )
+        # "Dr. Carlos atende qual especialidade?"
+        if any(w in normalized for w in ["especialidade", "atende", "área", "area"]):
+            return RoutingDecision(
+                intent=Intent.GET_PROFESSIONAL_SPECIALTY,
+                confidence=0.9,
+                route="structured_data_lookup",
+                source_of_truth="entity:professional_name",
+                tool_used="list_professionals",
+                suggested_action={
+                    "action": "get_professional_specialty",
+                    "args": {"professional_name": entities.professional_name},
+                },
+                reason="professional_name + specialty question",
+            )
         return RoutingDecision(
-            intent=Intent.GET_PROFESSIONAL_SPECIALTY,
-            confidence=0.9,
+            intent=Intent.LIST_PROFISSIONAIS,
+            confidence=0.85,
             route="structured_data_lookup",
             source_of_truth="entity:professional_name",
             tool_used="list_professionals",
             suggested_action={
-                "action": "get_professional_specialty",
-                "args": {"professional_name": entities.professional_name},
+                "action": "get_professional",
+                "args": {"name": entities.professional_name},
             },
-            reason="professional_name detected, no scheduling verb",
+            reason="professional_name detected",
         )
 
     # -----------------------------------------------------------------
@@ -264,7 +328,7 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
                 confidence=0.9,
                 route="schedule_flow",
                 source_of_truth="entity:specialty + date_reference",
-                tool_used="schedule_service",
+                tool_used="schedule_actions",
                 suggested_action={
                     "action": "schedule_by_specialty",
                     "args": {
@@ -274,29 +338,47 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
                 },
                 reason="specialty + date_reference detected",
             )
+        # "qual horário disponível com dermatologista?" → SCHEDULING
+        # "tem vaga para ortopedia?" → SCHEDULING
+        # "disponível" + specialty = availability check
+        if _contains_availability_keyword(normalized):
+            return RoutingDecision(
+                intent=Intent.SCHEDULING,
+                confidence=0.85,
+                route="schedule_flow",
+                source_of_truth="entity:specialty + availability_keyword",
+                tool_used="schedule_actions",
+                suggested_action={
+                    "action": "schedule_by_specialty",
+                    "args": {"specialty": entities.specialty},
+                },
+                reason="specialty + availability keyword detected",
+            )
         if _contains_listing_pattern(normalized):
             return RoutingDecision(
                 intent=Intent.LIST_PROFISSIONAIS_BY_SPECIALTY,
                 confidence=0.9,
                 route="structured_data_lookup",
                 source_of_truth="entity:specialty + listing_pattern",
-                tool_used="list_professionals_by_specialty",
+                tool_used="list_professionals",
                 suggested_action={
                     "action": "list_professionals_by_specialty",
                     "args": {"specialty": entities.specialty},
                 },
                 reason="specialty detected with listing pattern",
             )
+        # "tem cardiologista?", "vocês atendem neurologia?", "tem neuro?"
+        # → LIST_PROFISSIONAIS_BY_SPECIALTY (perguntando se existe profissional)
         return RoutingDecision(
-            intent=Intent.CHECK_AVAILABILITY,
+            intent=Intent.LIST_PROFISSIONAIS_BY_SPECIALTY,
             confidence=0.8,
-            route="schedule_flow",
+            route="structured_data_lookup",
             source_of_truth="entity:specialty",
             suggested_action={
-                "action": "check_availability_by_specialty",
+                "action": "list_professionals_by_specialty",
                 "args": {"specialty": entities.specialty},
             },
-            reason="specialty detected without scheduling context",
+            reason="specialty detected — asking about available professionals",
         )
 
     # -----------------------------------------------------------------
@@ -356,7 +438,7 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
             confidence=0.85,
             route="schedule_flow",
             source_of_truth="entity:date_reference + scheduling_verb",
-            tool_used="schedule_service",
+            tool_used="schedule_actions",
             suggested_action={
                 "action": "schedule",
                 "args": {"date_reference": entities.date_reference},
@@ -365,9 +447,38 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
         )
 
     # -----------------------------------------------------------------
-    # Rule 8 — Listing patterns
+    # Rule 8 — Scheduling verb without specific entity (before listing!)
+    # "tem consulta", "marcar consulta", "preciso de consulta" → SCHEDULING
+    # -----------------------------------------------------------------
+    if _contains_scheduling_verb(normalized):
+        return RoutingDecision(
+            intent=Intent.SCHEDULING,
+            confidence=0.8,
+            route="schedule_flow",
+            source_of_truth="scheduling_verb",
+            tool_used="schedule_actions",
+            suggested_action={"action": "schedule", "args": {}},
+            reason="Scheduling verb detected",
+        )
+
+    # -----------------------------------------------------------------
+    # Rule 9 — Listing patterns
     # -----------------------------------------------------------------
     if _contains_listing_pattern(normalized):
+        # "tem + service_name" → SCHEDULING (asking about appointment availability)
+        if entities.service_name and any(v in normalized for v in ["tem", "têm", "há", "existe", "existem"]):
+            return RoutingDecision(
+                intent=Intent.SCHEDULING,
+                confidence=0.85,
+                route="schedule_flow",
+                source_of_truth="listing_pattern + service_name",
+                tool_used="schedule_actions",
+                suggested_action={
+                    "action": "schedule",
+                    "args": {"service_name": entities.service_name},
+                },
+                reason="Listing pattern with service_name detected",
+            )
         if any(p in normalized for p in {"especialidade", "especialidades"}):
             return RoutingDecision(
                 intent=Intent.LIST_SPECIALTIES,
@@ -386,20 +497,6 @@ def decide(text: str, entities: DetectedEntities) -> RoutingDecision:
             tool_used="list_professionals",
             suggested_action={"action": "list_professionals", "args": {}},
             reason="Listing pattern without specialty keyword",
-        )
-
-    # -----------------------------------------------------------------
-    # Rule 9 — Scheduling verb without specific entity
-    # -----------------------------------------------------------------
-    if _contains_scheduling_verb(normalized):
-        return RoutingDecision(
-            intent=Intent.SCHEDULING,
-            confidence=0.75,
-            route="schedule_flow",
-            source_of_truth="scheduling_verb",
-            tool_used="schedule_service",
-            suggested_action={"action": "schedule", "args": {}},
-            reason="Scheduling verb without specific entity",
         )
 
     # -----------------------------------------------------------------

@@ -32,8 +32,8 @@ _ENTITY_LABELS = [
 
 # Portuguese greeting patterns
 _GREETING_PATTERNS = [
-    re.compile(r"^\s*(oi|olá|ola|ei|e aí|eaí|opa|bom dia|boa tarde|boa noite|hey|hi|hello)\b", re.I),
-    re.compile(r"\b(oi|olá|ola|ei|e aí|eaí|opa|bom dia|boa tarde|boa noite|hey|hi|hello)\s*[!,.\-]*\s*$", re.I),
+    re.compile(r"^\s*(oi|olá|ola|ei|e aí|eaí|opa|bom dia|boa tarde|boa noite|hey|hi|hello|tudo bem|começar|vc é um|vocês são|bot)\b", re.I),
+    re.compile(r"\b(oi|olá|ola|ei|e aí|eaí|opa|bom dia|boa tarde|boa noite|hey|hi|hello|tudo bem|começar|vc é um|vocês são|bot)\s*[!,.\-]*\s*$", re.I),
 ]
 
 # Professional name patterns
@@ -71,6 +71,15 @@ _SPECIALTY_PATTERNS = [
     re.compile(r"\b(estética\s+médica)\b", re.I),
     re.compile(r"\b(nutrologia|nutrologista)\b", re.I),
     re.compile(r"\b(geral)\b", re.I),
+    # "de [especialidade]" construction: "médico de cardiologia", "especialista de neurologia"
+    re.compile(r"\bde\s+(cardiologia|cardiologista)\b", re.I),
+    re.compile(r"\bde\s+(neurologia|neurologista|neuro)\b", re.I),
+    re.compile(r"\bde\s+(ortopedia|ortopedista|ortop)\b", re.I),
+    re.compile(r"\bde\s+(dermatologia|dermatologista|dermato)\b", re.I),
+    re.compile(r"\bde\s+(pediatria|pediatra|pedia)\b", re.I),
+    re.compile(r"\bde\s+(ginecologia|ginecologista|gineco)\b", re.I),
+    re.compile(r"\bde\s+(oftalmologia|oftalmologista|oftalmo)\b", re.I),
+    re.compile(r"\bde\s+(endocrinologia|endocrinologista|endocrino)\b", re.I),
 ]
 
 # Insurance plan patterns
@@ -127,13 +136,19 @@ _TIME_PATTERNS = [
 _CLINIC_INFO_PATTERNS = [
     re.compile(r"\b(endereço|endereco|rua|av\.|avenida)\b", re.I),
     re.compile(r"\b(telefone|tel|contato)\b", re.I),
-    re.compile(r"\b(horário|horario|funcionamento|abertura)\b", re.I),
-    re.compile(r"\b(local|localização|localizacao)\b", re.I),
+    re.compile(r"\b(funcionamento|abertura)\b", re.I),
+    re.compile(r"\b(local|localização|localizacao|onde\s+fica|onde\s+esta|onde\s+vcs|onde\s+vocês)\b", re.I),
     re.compile(r"\b(preço|preco|valor|quanto\s+custa|custo)\b", re.I),
     re.compile(r"\b(convênio|convenio|plano\s+de\s+saúde)\b", re.I),
     re.compile(r"\b(emergência|urgência|pronto\s+socorro)\b", re.I),
     re.compile(r"\b(estacionamento)\b", re.I),
     re.compile(r"\b(wi-?fi|internet)\b", re.I),
+    re.compile(r"\b(nome\s+da\s+clínica)\b", re.I),
+    re.compile(r"\b(nome\s+da\s+clnica)\b", re.I),
+    re.compile(r"\bclínica\b", re.I),
+    re.compile(r"\bclnica\b", re.I),
+    re.compile(r"\b(atendem|atendimento|atende)\b", re.I),
+    re.compile(r"\b(sábado|sábados|sabado|domingo|feriado)\b", re.I),
 ]
 
 # Map entity type to its patterns
@@ -386,9 +401,25 @@ class NerService:
                     elif label == "professional_name":
                         # Dr. Carlos → "Carlos"
                         if match.lastindex and match.lastindex >= 1:
-                            result.professional_name = match.group(1).strip()
+                            captured = match.group(1).strip()
+                            # If captured name is a title-only word (Dr, Dra, Médico),
+                            # it's not a real name — skip this match and retry specialty
+                            _TITLE_WORDS = frozenset({
+                                "dr", "dra", "dra", "dr.", "dra.",
+                                "médico", "médica", "medico", "medica",
+                                "professor", "professora",
+                            })
+                            if captured.lower() in _TITLE_WORDS:
+                                # Not a real name — skip professional_name, continue to specialty
+                                continue
+                            result.professional_name = captured
                         else:
-                            result.professional_name = match.group(0).strip()
+                            name = match.group(0).strip()
+                            # If entire match is just a title word, skip
+                            _TITLE_ONLY = frozenset({"dr", "dra", "médico", "médica", "medico", "medica"})
+                            if name.lower().rstrip(".") in _TITLE_ONLY:
+                                continue
+                            result.professional_name = name
                     elif label == "specialty":
                         result.specialty = _normalize_specialty(match.group(0))
                     elif label == "insurance_plan":

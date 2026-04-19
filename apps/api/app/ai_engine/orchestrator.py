@@ -207,6 +207,13 @@ class EngineResponse:
     source_of_truth: str = "none"
     structured_lookup_used: bool = False
     rag_used: bool = False
+    # Instrumentation fields
+    groq_called: bool = False
+    llm_provider: str = ""
+    llm_model: str = ""
+    llm_stage: str = ""
+    llm_latency_ms: float = 0.0
+    response_mode: str = ""
 
 
 # ─── Orchestrator ─────────────────────────────────────────────────────────────
@@ -357,6 +364,14 @@ class AIOrchestrator:
                 faro_brief=None,
                 route=state.route,
                 source_of_truth=state.source_of_truth,
+                structured_lookup_used=False,
+                rag_used=False,
+                groq_called=False,
+                llm_provider="",
+                llm_model="",
+                llm_stage="",
+                llm_latency_ms=0.0,
+                response_mode="numeric_guard",
             )
             await self._audit(conversation, user_text, state, resp)
             return resp
@@ -506,6 +521,12 @@ class AIOrchestrator:
                 source_of_truth=state.source_of_truth,
                 structured_lookup_used=True,
                 rag_used=False,
+                groq_called=False,
+                llm_provider="",
+                llm_model="",
+                llm_stage="",
+                llm_latency_ms=0.0,
+                response_mode=state.response_mode,
             )
             await self._audit(conversation, user_text, state, resp)
             return resp
@@ -540,6 +561,14 @@ class AIOrchestrator:
                 faro_brief=faro.to_dict(),
                 route=state.route,
                 source_of_truth=state.source_of_truth,
+                structured_lookup_used=False,
+                rag_used=False,
+                groq_called=False,
+                llm_provider="",
+                llm_model="",
+                llm_stage="",
+                llm_latency_ms=0.0,
+                response_mode=state.response_mode,
             )
             await self._audit(conversation, user_text, state, resp)
             return resp
@@ -680,6 +709,18 @@ class AIOrchestrator:
             state.handoff_reason = "patient_request"
             state.route = "handoff_flow"
 
+        # ── Extract LLM instrumentation from composer payload ──────────────────
+        groq_called = bool(state.rag_used or state.response_mode == "llm")
+        llm_provider = "groq"
+        llm_model = ""
+        llm_stage = state.route if state.route in (
+            "response_composer", "rag_retrieval", "fallback", "clarification_flow"
+        ) else ""
+        llm_latency_ms = 0.0
+        if state.composer_audit_payload:
+            llm_model = state.composer_audit_payload.get("llm_model", "") or ""
+            llm_latency_ms = state.composer_audit_payload.get("llm_latency_ms", 0.0) or 0.0
+
         # ══ NODE 10: persist_and_audit ════════════════════════════════════════
         final_resp = EngineResponse(
             text=final_text,
@@ -693,6 +734,12 @@ class AIOrchestrator:
             source_of_truth=state.source_of_truth,
             structured_lookup_used=state.structured_lookup_used,
             rag_used=state.rag_used,
+            groq_called=groq_called,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_stage=llm_stage,
+            llm_latency_ms=llm_latency_ms,
+            response_mode=state.response_mode,
         )
         await self._audit(conversation, user_text, state, final_resp)
         return final_resp
