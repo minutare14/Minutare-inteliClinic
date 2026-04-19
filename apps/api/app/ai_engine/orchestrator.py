@@ -1314,8 +1314,8 @@ class AIOrchestrator:
         if faro.intent == Intent.CONFIRMACAO:
             return None
 
-        # ── LIST_PROFISSIONAIS: "quais médicos vocês têm?" / "quem atende neurologia?" ──
-        if faro.intent == Intent.LIST_PROFISSIONAIS:
+        # ── LISTAR_PROFISSIONAIS: "quais médicos vocês têm?" / "quem atende neurologia?" ──
+        if faro.intent == Intent.LISTAR_PROFISSIONAIS:
             doctor_name = entities.get("doctor_name")
             specialty_filter = entities.get("specialty")
 

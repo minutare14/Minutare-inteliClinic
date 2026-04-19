@@ -245,11 +245,11 @@ class StructuredLookup:
         # ── Priority 2: Which doctors attend a specialty ──────────────────────
         # "Quais médicos atendem ortopedia?"
         # "Tem médico de cardiologia?"
-        # "tem neuro?" (specialty detected + LIST_PROFISSIONAIS)
+        # "tem neuro?" (specialty detected + LISTAR_PROFISSIONAIS)
         if specialty and (
             _matches_any(text_norm, _SPECIALTY_DOCTORS_KW)
             or faro.intent == Intent.LISTAR_ESPECIALIDADES
-            or faro.intent == Intent.LIST_PROFISSIONAIS
+            or faro.intent == Intent.LISTAR_PROFISSIONAIS
         ):
             result = await self._lookup_specialty_doctors(specialty)
             if result.answered:

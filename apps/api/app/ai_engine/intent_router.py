@@ -388,7 +388,7 @@ def _suggest_actions(intent: Intent, entities: dict) -> list[dict]:
                 "args": {k: v for k, v in entities.items() if k in ("date", "time", "doctor_name")},
                 "risk": "read",
             })
-    elif intent == Intent.LIST_PROFISSIONAIS:
+    elif intent == Intent.LISTAR_PROFISSIONAIS:
         suggestions.append({"action": "list_professionals", "args": {}, "risk": "read"})
     elif intent == Intent.LISTAR_ESPECIALIDADES:
         suggestions.append({"action": "list_specialties", "args": {}, "risk": "read"})
@@ -434,7 +434,7 @@ def analyze(text: str, specialties_override: list[str] | None = None) -> FaroBri
 
     # 4b. Specialty detected — decide between informational and scheduling intent.
     #
-    # "tem neuro?" / "vocês tem cardiologista?" → LIST_PROFISSIONAIS (asking about available doctors)
+    # "tem neuro?" / "vocês tem cardiologista?" → LISTAR_PROFISSIONAIS (asking about available doctors)
     # "quais especialidades vocês oferecem?" → LISTAR_ESPECIALIDADES
     # AGENDAR + specialty → boost confidence (already correctly classified)
     #
@@ -442,11 +442,11 @@ def analyze(text: str, specialties_override: list[str] | None = None) -> FaroBri
         if intent == Intent.DESCONHECIDA:
             # "tem neuro?", "vocês tem cardiologista?", "tem ortopedista?"
             # → user wants to know which doctors are available in that specialty
-            intent = Intent.LIST_PROFISSIONAIS
+            intent = Intent.LISTAR_PROFISSIONAIS
             confidence = 0.80
         elif intent == Intent.AGENDAR:
             confidence = min(confidence + 0.10, 0.99)
-        elif intent == Intent.LIST_PROFISSIONAIS:
+        elif intent == Intent.LISTAR_PROFISSIONAIS:
             confidence = min(confidence + 0.10, 0.99)
 
     # 5. Missing fields
