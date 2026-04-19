@@ -68,6 +68,10 @@ dependencies = [
     # Output validation: https://github.com/guardrails-ai/guardrails
     "guardrails-ai>=0.5.0",
 
+    # --- NER — GLiNER multilingual ---
+    # Entity extraction: https://github.com/urchade/gliner-multilingual
+    "gliner>=0.2.26",
+
     # --- Analytics — PyOD ---
     # Anomaly detection: https://github.com/yzhao062/pyod
     "pyod>=2.0.0",
