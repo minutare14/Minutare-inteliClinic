@@ -627,4 +627,64 @@ implementar → npm build → commit → push → deploy → verificar health
 
 ---
 
+## 12. Bug de Runtime — `ModuleNotFoundError: No module named 'pinecone'`
+
+### Problema
+
+Após correção do build do frontend (`DocumentSummary`), o container `testeinteliclinc-climesa-2q1y1a-api` ficou em loop **Restarting (1)**. Logs:
+
+```
+File "/app/app/core/pinecone_client.py", line 7, in <module>
+    from pinecone import Pinecone
+ModuleNotFoundError: No module named 'pinecone'
+```
+
+### Causa Raiz
+
+1. `pinecone_client.py` tinha import no nível do módulo (`from pinecone import Pinecone`)
+2. O pacote `pinecone` **nunca foi adicionado** às dependências em `pyproject.toml`
+3. O lazy loading do `_get_client()` não estava implementado — o import era top-level
+
+### Correções Aplicadas
+
+**1. `apps/api/app/core/pinecone_client.py`** — import lazy dentro de `_get_client()`:
+```python
+def _get_client(self) -> Any:
+    if self._client is None:
+        from pinecone import Pinecone  # lazy load — only imported when actually needed
+        self._client = Pinecone(api_key=settings.pinecone_api_key)
+    return self._client
+```
+
+**2. `apps/api/pyproject.toml`** — dependência adicionada:
+```toml
+# --- RAG — Pinecone vector store ---
+"pinecone>=5.0.0",
+```
+
+**Commit:** `1513786` — `fix(api): lazy-load pinecone import + add pinecone dependency`
+
+### Verificação
+
+- Import local: `python -c "from app.core.pinecone_client import PineconeClient; print('import ok')"` → **ok**
+- Build image: `docker compose build api` → **Built**
+- Deploy: `docker compose up -d --no-deps api` → **Container Started**
+
+### Estado Final dos Containers (após debug loop)
+
+| Container | Status |
+|----------|--------|
+| climesa-frontend | ✅ healthy |
+| testeinteliclinc-climesa-2q1y1a-frontend | ✅ healthy |
+| climesa-api | ✅ healthy |
+| testeinteliclinc-climesa-2q1y1a-api | ✅ healthy |
+| climesa-db | ✅ healthy |
+| climesa-qdrant | ✅ healthy |
+| testeinteliclinc-climesa-2q1y1a-db | ✅ healthy |
+| testeinteliclinc-climesa-2q1y1a-qdrant | ✅ healthy |
+
+**Ciclo de deploy completo — OK.**
+
+---
+
 *Relatório gerado em 2026-04-18 — todas as 18 tarefas do plano Pinecone + Document Upload concluídas.*
